@@ -8,7 +8,7 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('./database');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -28,11 +28,11 @@ const SqliteStore = (() => {
         )
       `);
       // Limpa sessões expiradas na inicialização
-      this.db.exec('DELETE FROM sessions WHERE datetime("now") > expired');
+      this.db.exec('DELETE FROM sessions WHERE datetime(\'now\') > expired');
     }
     get(sid, cb) {
       try {
-        const row = this.db.prepare('SELECT sess FROM sessions WHERE sid = ? AND datetime("now") <= expired').get(sid);
+        const row = this.db.prepare('SELECT sess FROM sessions WHERE sid = ? AND datetime(\'now\') <= expired').get(sid);
         if (!row) return cb(null, null);
         cb(null, JSON.parse(row.sess));
       } catch (err) {
