@@ -71,3 +71,26 @@ async function load() {
 
 load();
 setInterval(load, 15000);
+
+// Lógica de alternar tema claro/escuro
+const btnTheme = document.getElementById('btn-theme');
+if (btnTheme) {
+  function updateThemeIcon() {
+    const isDark = document.documentElement.classList.contains('dark-theme');
+    if (isDark) {
+      btnTheme.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m11.314 11.314l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z"/></svg>`;
+      btnTheme.title = "Alternar para tema claro";
+    } else {
+      btnTheme.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>`;
+      btnTheme.title = "Alternar para tema escuro";
+    }
+  }
+
+  updateThemeIcon();
+
+  btnTheme.addEventListener('click', () => {
+    const isDark = document.documentElement.classList.toggle('dark-theme');
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+    updateThemeIcon();
+  });
+}

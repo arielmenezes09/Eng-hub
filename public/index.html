@@ -4,6 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Eng-Hub | Acesso</title>
+  <script>
+    (function() {
+      const theme = localStorage.getItem('theme') || 'light';
+      if (theme === 'dark') {
+        document.documentElement.classList.add('dark-theme');
+      }
+    })();
+  </script>
   <link rel="stylesheet" href="css/style.css">
   <style>
     /* Estilos essenciais — garantem layout mesmo se o CSS externo falhar */
@@ -28,6 +36,9 @@
   </style>
 </head>
 <body class="auth-page">
+  <button type="button" id="btn-theme" class="btn btn--ghost btn--icon btn--icon-theme theme-toggle-auth" title="Alternar tema" style="position: absolute; top: 1.25rem; right: 1.25rem; color: #fff; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 50%; z-index: 10;">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m11.314 11.314l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z"/></svg>
+  </button>
   <div class="auth-wrapper">
     <div class="auth-box">
       <div class="auth-box__logo">

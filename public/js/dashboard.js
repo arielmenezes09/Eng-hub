@@ -74,6 +74,22 @@ async function init() {
   bindEvents();
 }
 
+  // Fetch users for member selection
+  let allUsers = [];
+  async function loadUsers() {
+    allUsers = await api('/api/users');
+    const membersSelect = $('#project-members-select');
+    if (membersSelect) {
+      membersSelect.innerHTML = '';
+      allUsers.forEach(u => {
+        const opt = document.createElement('option');
+        opt.value = u.username;
+        opt.textContent = u.username;
+        membersSelect.appendChild(opt);
+      });
+    }
+  }
+
 async function loadProjects() {
   projects = await api('/api/projects');
   renderProjectList();
@@ -85,13 +101,19 @@ function renderProjectList() {
     list.innerHTML = '<li style="padding:1rem;color:var(--text-muted);font-size:0.85rem">Nenhum projeto ainda</li>';
     return;
   }
-  list.innerHTML = projects.map(p => `
+  const filtered = getFilteredProjects();
+  list.innerHTML = filtered.map(p => `
     <li class="project-item ${currentProject?.id === p.id ? 'active' : ''}" data-id="${p.id}">
       <div class="project-item__name">${escapeHtml(p.name)}</div>
-      <div class="project-item__meta">${p.fileCount} arquivo(s) · ${formatDate(p.updatedAt)}</div>
+      <div class="project-item__meta">
+        ${p.fileCount} arquivo(s) · ${formatDate(p.updatedAt)}
+        ${p.status ? '· ' + escapeHtml(p.status) : ''}
+        ${p.deadline ? '· Até ' + formatDate(p.deadline) : ''}
+      </div>
     </li>
   `).join('');
 
+  // Re-attach click handlers after rendering
   list.querySelectorAll('.project-item').forEach(item => {
     item.addEventListener('click', () => selectProject(Number(item.dataset.id)));
   });
@@ -105,6 +127,12 @@ async function selectProject(id) {
   $('#project-view').classList.remove('hidden');
   $('#project-name').textContent = currentProject.name;
   $('#project-desc').textContent = currentProject.description || 'Sem descrição';
+
+  // Fechar menu lateral no celular quando um projeto for selecionado
+  const sidebar = $('.sidebar');
+  const overlay = $('#sidebar-overlay');
+  if (sidebar) sidebar.classList.remove('sidebar--open');
+  if (overlay) overlay.classList.remove('active');
 
   renderProjectList();
   await loadFiles();
@@ -128,23 +156,33 @@ function renderFiles(filter = '') {
     return;
   }
 
-  list.innerHTML = filtered.map(f => `
-    <div class="file-item" data-id="${f.id}">
-      <span class="file-item__icon">${escapeHtml(fileExt(f.originalName))}</span>
-      <div class="file-item__info">
-        <div class="file-item__name" title="${escapeHtml(f.originalName)}">${escapeHtml(f.originalName)}</div>
-        <div class="file-item__meta">${formatSize(f.size)} · ${escapeHtml(f.uploadedBy)} · ${formatDate(f.uploadedAt)}</div>
+    // Render files with access check
+    const canAccess = currentProject.members && currentProject.members.includes(currentUser.username);
+    list.innerHTML = filtered.map(f => `
+      <div class="file-item" data-id="${f.id}">
+        <span class="file-item__icon">${escapeHtml(fileExt(f.originalName))}</span>
+        <div class="file-item__info">
+          <div class="file-item__name" title="${escapeHtml(f.originalName)}">${escapeHtml(f.originalName)}</div>
+          <div class="file-item__meta">${formatSize(f.size)} · ${escapeHtml(f.uploadedBy)} · ${formatDate(f.uploadedAt)}</div>
+        </div>
+        <div class="file-item__actions">
+          ${canAccess ? `<a href="/api/projects/${currentProject.id}/files/${f.id}/download" class="btn btn--outline btn--sm">Baixar</a>` : '<span class="text-muted">Sem acesso</span>'}
+          ${canAccess ? `<button type="button" class="btn btn--danger btn--sm btn-delete-file" data-id="${f.id}">Excluir</button>` : ''}
+        </div>
       </div>
-      <div class="file-item__actions">
-        <a href="/api/projects/${currentProject.id}/files/${f.id}/download" class="btn btn--outline btn--sm">Baixar</a>
-        <button type="button" class="btn btn--danger btn--sm btn-delete-file" data-id="${f.id}">Excluir</button>
-      </div>
-    </div>
-  `).join('');
+    `).join('');
 
-  list.querySelectorAll('.btn-delete-file').forEach(btn => {
-    btn.addEventListener('click', () => deleteFile(Number(btn.dataset.id)));
-  });
+
+    // Ensure only members can delete files
+    list.querySelectorAll('.btn-delete-file').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!currentProject.members || !currentProject.members.includes(currentUser.username)) {
+          alert('Você não tem permissão para excluir este arquivo.');
+          return;
+        }
+        deleteFile(Number(btn.dataset.id));
+      });
+    });
 }
 
 async function loadActivity() {
@@ -187,39 +225,75 @@ function startSync() {
   }, 5000);
 }
 
-function openProjectModal(edit = false) {
+async function openProjectModal(edit = false) {
   const modal = $('#modal-project');
+  // Ensure members list is loaded
+  await loadUsers();
+  // Populate fields when editing
+  if (edit && currentProject) {
+    $('#project-deadline-input').value = currentProject.deadline ? currentProject.deadline.split('T')[0] : '';
+    $('#project-status-select').value = currentProject.status || '';
+    // Set selected members
+    const membersSelect = $('#project-members-select');
+    if (membersSelect) {
+      Array.from(membersSelect.options).forEach(opt => {
+        opt.selected = currentProject.members && currentProject.members.includes(opt.value);
+      });
+    }
+  } else {
+    $('#project-deadline-input').value = '';
+    $('#project-status-select').value = '';
+    const membersSelect = $('#project-members-select');
+    if (membersSelect) membersSelect.value = '';
+  }
   $('#modal-project-title').textContent = edit ? 'Editar projeto' : 'Novo projeto';
   $('#project-name-input').value = edit ? currentProject.name : '';
   $('#project-desc-input').value = edit ? (currentProject.description || '') : '';
   modal.showModal();
 }
 
+
+
 async function saveProject(e) {
   e.preventDefault();
   const name = $('#project-name-input').value.trim();
   const description = $('#project-desc-input').value.trim();
+  const deadline = $('#project-deadline-input').value; // ISO date string (yyyy-mm-dd)
+  const status = $('#project-status-select').value;
+
+    const selectedMembers = Array.from($('#project-members-select').selectedOptions).map(o => o.value);
+    if (selectedMembers.length > 10) {
+      alert('Selecione no máximo 10 membros.');
+      return;
+    }
+    const payload = { name, description, deadline: deadline || null, status: status || null, members: selectedMembers };
 
   if (currentProject && $('#modal-project-title').textContent.includes('Editar')) {
+    // Update existing project
     currentProject = await api(`/api/projects/${currentProject.id}`, {
       method: 'PUT',
-      body: JSON.stringify({ name, description })
+      body: JSON.stringify(payload)
     });
     $('#project-name').textContent = currentProject.name;
     $('#project-desc').textContent = currentProject.description || 'Sem descrição';
   } else {
+  
+    // Create new project
     const project = await api('/api/projects', {
       method: 'POST',
-      body: JSON.stringify({ name, description })
+      body: JSON.stringify(payload)
     });
     projects.unshift(project);
     await selectProject(project.id);
+
   }
 
   await loadProjects();
   await loadActivity();
   $('#modal-project').close();
 }
+
+
 
 async function deleteProject() {
   if (!currentProject) return;
@@ -294,9 +368,27 @@ function bindEvents() {
     window.location.href = '/';
   });
 
+  // Filter UI events
+  const filterStatus = $('#filter-status');
+  const filterDeadline = $('#filter-deadline');
+  if (filterStatus) filterStatus.addEventListener('change', renderProjectList);
+  if (filterDeadline) filterDeadline.addEventListener('change', renderProjectList);
+
+  // Helper to filter projects based on UI selections
+  window.getFilteredProjects = function () {
+    const status = filterStatus ? filterStatus.value : '';
+    const deadline = filterDeadline ? filterDeadline.value : '';
+    return projects.filter(p => {
+      const matchStatus = !status || (p.status === status);
+      const matchDeadline = !deadline || (p.deadline && p.deadline.split('T')[0] <= deadline);
+      return matchStatus && matchDeadline;
+    });
+  };
+
   $('#btn-new-project').addEventListener('click', () => openProjectModal(false));
-  $('#btn-new-project-empty').addEventListener('click', () => openProjectModal(false));
-  $('#btn-edit-project').addEventListener('click', () => openProjectModal(true));
+
+
+
   $('#btn-delete-project').addEventListener('click', deleteProject);
   $('#btn-share').addEventListener('click', showShareModal);
 

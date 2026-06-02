@@ -4,20 +4,36 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Eng-Hub | Projetos</title>
+  <script>
+    (function() {
+      const theme = localStorage.getItem('theme') || 'light';
+      if (theme === 'dark') {
+        document.documentElement.classList.add('dark-theme');
+      }
+    })();
+  </script>
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body class="bg-grid">
   <header class="app-header">
-    <a href="/dashboard" class="logo logo--light">
-      <div class="logo__mark">
-        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#fff" d="M12 2L2 7v10l10 5 10-5V7L12 2zm0 2.2l7.5 3.75v7.5L12 19.8l-7.5-3.75v-7.5L12 4.2zM12 8a4 4 0 100 8 4 4 0 000-8z"/></svg>
-      </div>
-      <div class="logo__text">
-        <span class="logo__name">Eng-Hub</span>
-        <span class="logo__tag">Gestão de projetos</span>
-      </div>
-    </a>
+    <div style="display: flex; align-items: center;">
+      <button type="button" id="btn-menu" class="btn btn--ghost btn--icon btn-mobile-menu" title="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <a href="/dashboard" class="logo logo--light">
+        <div class="logo__mark">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#fff" d="M12 2L2 7v10l10 5 10-5V7L12 2zm0 2.2l7.5 3.75v7.5L12 19.8l-7.5-3.75v-7.5L12 4.2zM12 8a4 4 0 100 8 4 4 0 000-8z"/></svg>
+        </div>
+        <div class="logo__text">
+          <span class="logo__name">Eng-Hub</span>
+          <span class="logo__tag">Gestão de projetos</span>
+        </div>
+      </a>
+    </div>
     <div class="app-header__actions">
+      <button type="button" id="btn-theme" class="btn btn--ghost btn--icon btn--icon-theme" title="Alternar tema">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m11.314 11.314l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z"/></svg>
+      </button>
       <span id="user-info" class="user-badge"></span>
       <button type="button" id="btn-logout" class="btn btn--ghost btn--sm">Sair</button>
     </div>
@@ -30,6 +46,21 @@
         <button type="button" id="btn-new-project" class="btn btn--primary btn--sm btn--icon" title="Novo projeto">+</button>
       </div>
       <ul id="project-list" class="project-list"></ul>
+        <div class="project-filters">
+          <div class="form-group">
+            <label for="filter-status">Filtrar por status</label>
+            <select id="filter-status">
+              <option value="">Todos</option>
+              <option value="em_andamento">Em andamento</option>
+              <option value="concluido">Concluído</option>
+              <option value="pendente">Pendente</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="filter-deadline">Prazo até</label>
+            <input type="date" id="filter-deadline" />
+          </div>
+        </div>
       <div class="sidebar__activity">
         <h3>Atividade recente</h3>
         <ul id="activity-feed" class="activity-feed"></ul>
@@ -88,6 +119,18 @@
         <label for="project-name-input">Nome do projeto *</label>
         <input type="text" id="project-name-input" required placeholder="Ex: Residencial Solar — Fase 2">
       </div>
+        <div class="form-group">
+          <label for="project-deadline-input">Prazo de entrega *</label>
+          <input type="date" id="project-deadline-input" required />
+        </div>
+        <div class="form-group">
+          <label for="project-status-select">Status *</label>
+          <select id="project-status-select" required>
+            <option value="em_andamento">Em andamento</option>
+            <option value="concluido">Concluído</option>
+            <option value="pendente">Pendente</option>
+          </select>
+        </div>
       <div class="form-group">
         <label for="project-desc-input">Descrição</label>
         <textarea id="project-desc-input" rows="3" placeholder="Detalhes do projeto..."></textarea>
@@ -111,6 +154,8 @@
       <button type="button" class="btn btn--primary" data-close>Fechar</button>
     </div>
   </dialog>
+
+  <div id="sidebar-overlay" class="sidebar-overlay"></div>
 
   <script src="/js/dashboard.js"></script>
 </body>

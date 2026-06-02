@@ -13,9 +13,57 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
+// Armazenador de sessões persistente no SQLite
+const SqliteStore = (() => {
+  const Store = session.Store;
+  return class extends Store {
+    constructor(database) {
+      super();
+      this.db = database;
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS sessions (
+          sid TEXT PRIMARY KEY,
+          sess TEXT NOT NULL,
+          expired TEXT NOT NULL
+        )
+      `);
+      // Limpa sessões expiradas na inicialização
+      this.db.exec('DELETE FROM sessions WHERE datetime("now") > expired');
+    }
+    get(sid, cb) {
+      try {
+        const row = this.db.prepare('SELECT sess FROM sessions WHERE sid = ? AND datetime("now") <= expired').get(sid);
+        if (!row) return cb(null, null);
+        cb(null, JSON.parse(row.sess));
+      } catch (err) {
+        cb(err);
+      }
+    }
+    set(sid, sess, cb) {
+      try {
+        const expired = new Date(sess.cookie.expires || (Date.now() + 7 * 24 * 60 * 60 * 1000)).toISOString();
+        const sessStr = JSON.stringify(sess);
+        this.db.prepare('INSERT OR REPLACE INTO sessions (sid, sess, expired) VALUES (?, ?, ?)').run(sid, sessStr, expired);
+        cb(null);
+      } catch (err) {
+        cb(err);
+      }
+    }
+    destroy(sid, cb) {
+      try {
+        this.db.prepare('DELETE FROM sessions WHERE sid = ?').run(sid);
+        cb(null);
+      } catch (err) {
+        cb(err);
+      }
+    }
+  };
+})();
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
+  store: new SqliteStore(db),
   secret: process.env.SESSION_SECRET || 'eng-hub-secret-change-in-production',
   resave: false,
   saveUninitialized: false,
