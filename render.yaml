@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: eng-hub-backend
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: SESSION_SECRET
+        value: "your-secret-here"
+      - key: NODE_ENV
+        value: "production"
+    # Upload directory (SQLite DB) will be persisted by Render automatically
