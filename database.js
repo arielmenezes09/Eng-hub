@@ -16,6 +16,8 @@ db.exec(`
     password_hash TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
     phone TEXT NOT NULL,
+    reset_code TEXT,
+    reset_expires TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -54,5 +56,18 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
 `);
+
+// Migração segura para adicionar colunas de recuperação em bancos existentes
+try {
+  db.exec("ALTER TABLE users ADD COLUMN reset_code TEXT;");
+} catch (e) {
+  // A coluna já existe ou ocorreu outro erro aceitável
+}
+
+try {
+  db.exec("ALTER TABLE users ADD COLUMN reset_expires TEXT;");
+} catch (e) {
+  // A coluna já existe ou ocorreu outro erro aceitável
+}
 
 module.exports = db;

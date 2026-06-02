@@ -151,6 +151,82 @@ app.post('/api/auth/logout', (req, res) => {
   });
 });
 
+// --- Password Recovery ---
+
+app.post('/api/auth/forgot-password', (req, res) => {
+  const { identifier } = req.body;
+
+  if (!identifier || !identifier.trim()) {
+    return res.status(400).json({ error: 'Informe seu e-mail, telefone ou usuário' });
+  }
+
+  const cleanIdentifier = identifier.trim();
+  const user = db.prepare(
+    'SELECT id, username, email, phone FROM users WHERE email = ? OR phone = ? OR username = ? COLLATE NOCASE'
+  ).get(cleanIdentifier, cleanIdentifier, cleanIdentifier);
+
+  if (!user) {
+    return res.status(404).json({ error: 'Nenhum usuário encontrado com os dados informados' });
+  }
+
+  // Gera um código de 6 dígitos
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+  // Salva no banco com 15 minutos de validade
+  db.prepare(
+    "UPDATE users SET reset_code = ?, reset_expires = datetime('now', '+15 minutes') WHERE id = ?"
+  ).run(code, user.id);
+
+  // Simulação de envio (log no console do servidor e resposta de sucesso)
+  console.log(`\n======================================================`);
+  console.log(`[SIMULAÇÃO] Código de redefinição de senha para ${user.username}: ${code}`);
+  console.log(`======================================================\n`);
+
+  logActivity(user.id, null, 'forgot_password', `Código de recuperação gerado para ${user.username}`);
+
+  res.json({
+    message: `Código enviado com sucesso! (Simulado: ${code})`,
+    code: code // Retornando o código para testes rápidos no frontend
+  });
+});
+
+app.post('/api/auth/reset-password', (req, res) => {
+  const { identifier, code, newPassword } = req.body;
+
+  if (!identifier || !code || !newPassword) {
+    return res.status(400).json({ error: 'Preencha todos os campos obrigatórios' });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: 'A nova senha deve ter pelo menos 6 caracteres' });
+  }
+
+  const cleanIdentifier = identifier.trim();
+  const cleanCode = code.trim();
+
+  // Procura o usuário que tenha o código correspondente e ainda esteja dentro da validade
+  const user = db.prepare(`
+    SELECT * FROM users
+    WHERE (email = ? OR phone = ? OR username = ?)
+      AND reset_code = ?
+      AND datetime('now') < reset_expires
+  `).get(cleanIdentifier, cleanIdentifier, cleanIdentifier, cleanCode);
+
+  if (!user) {
+    return res.status(400).json({ error: 'Código de verificação inválido ou expirado' });
+  }
+
+  // Atualiza a senha e limpa o código
+  const hash = bcrypt.hashSync(newPassword, 10);
+  db.prepare(
+    "UPDATE users SET password_hash = ?, reset_code = NULL, reset_expires = NULL WHERE id = ?"
+  ).run(hash, user.id);
+
+  logActivity(user.id, null, 'reset_password', `Senha redefinida para ${user.username}`);
+
+  res.json({ message: 'Senha redefinida com sucesso!' });
+});
+
 // --- Projects ---
 
 app.get('/api/projects', requireAuth, (req, res) => {

@@ -52,7 +52,10 @@
           <input type="text" id="login-user" name="username" required autocomplete="username" placeholder="Seu usuário">
         </div>
         <div class="form-group">
-          <label for="login-pass">Senha</label>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <label for="login-pass" style="margin-bottom: 0.35rem;">Senha</label>
+            <button type="button" id="link-forgot" class="link-btn" style="font-size: 0.75rem; font-weight: 500; text-decoration: none; margin-bottom: 0.35rem;">Esqueci a senha</button>
+          </div>
           <input type="password" id="login-pass" name="password" required autocomplete="current-password" placeholder="Sua senha">
         </div>
         <button type="submit" class="btn btn--primary btn--block">Entrar</button>
@@ -70,6 +73,10 @@
           <input type="password" id="reg-pass" name="password" required autocomplete="new-password" placeholder="Mínimo 6 caracteres">
         </div>
         <div class="form-group">
+          <label for="reg-pass-confirm">Confirmar Senha *</label>
+          <input type="password" id="reg-pass-confirm" name="password_confirm" required placeholder="Repita a senha">
+        </div>
+        <div class="form-group">
           <label for="reg-email">E-mail *</label>
           <input type="email" id="reg-email" name="email" required autocomplete="email" placeholder="seu@email.com">
         </div>
@@ -79,6 +86,44 @@
         </div>
         <button type="submit" class="btn btn--primary btn--block">Criar conta</button>
         <p class="form-feedback" role="status"></p>
+      </form>
+
+      <form id="form-recovery" class="auth-form" hidden>
+        <p class="auth-box__subtitle">Recuperação de Senha</p>
+        
+        <!-- Etapa 1: Solicitar código -->
+        <div id="recovery-step-1">
+          <p class="text-muted" style="margin-bottom: 1.25rem; font-size: 0.8125rem;">Digite seu login, e-mail ou telefone para enviarmos um código de verificação.</p>
+          <div class="form-group">
+            <label for="recovery-identifier">Login, E-mail ou Telefone</label>
+            <input type="text" id="recovery-identifier" placeholder="usuario, e-mail ou (11) 99999-9999">
+          </div>
+          <button type="button" id="btn-send-code" class="btn btn--primary btn--block">Enviar código</button>
+        </div>
+
+        <!-- Etapa 2: Validar código e redefinir senha (inicia oculta) -->
+        <div id="recovery-step-2" class="hidden">
+          <p class="text-muted" style="margin-bottom: 1.25rem; font-size: 0.8125rem;">Insira o código de 6 dígitos que enviamos e defina sua nova senha.</p>
+          <div class="form-group">
+            <label for="recovery-code">Código de Verificação *</label>
+            <input type="text" id="recovery-code" maxlength="6" placeholder="Digite os 6 dígitos">
+          </div>
+          <div class="form-group">
+            <label for="recovery-pass">Nova Senha *</label>
+            <input type="password" id="recovery-pass" placeholder="Mínimo 6 caracteres">
+          </div>
+          <div class="form-group">
+            <label for="recovery-pass-confirm">Confirmar Nova Senha *</label>
+            <input type="password" id="recovery-pass-confirm" placeholder="Repita a nova senha">
+          </div>
+          <button type="submit" class="btn btn--primary btn--block">Redefinir senha</button>
+        </div>
+
+        <p class="form-feedback" role="status"></p>
+        
+        <div style="margin-top: 1.5rem; text-align: center; border-top: 1px solid var(--border-light); padding-top: 1rem;">
+          <button type="button" id="btn-back-login" class="link-btn" style="font-size: 0.8125rem; text-decoration: none;">Voltar para o Login</button>
+        </div>
       </form>
     </div>
 
