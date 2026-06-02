@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eng-Hub | Acesso</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* Estilos essenciais — garantem layout mesmo se o CSS externo falhar */
+    .auth-page {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      background: #152a45;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    .auth-wrapper { width: 100%; max-width: 440px; }
+    .auth-box {
+      background: #fff;
+      border-radius: 14px;
+      padding: 2.25rem 2rem;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.35);
+    }
+    .auth-form:not(.active) { display: none; }
+    .auth-form.active { display: block; }
+  </style>
+</head>
+<body class="auth-page">
+  <div class="auth-wrapper">
+    <div class="auth-box">
+      <div class="auth-box__logo">
+        <div class="logo__mark">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#fff" d="M12 2L2 7v10l10 5 10-5V7L12 2zm0 2.2l7.5 3.75v7.5L12 19.8l-7.5-3.75v-7.5L12 4.2zM12 8a4 4 0 100 8 4 4 0 000-8z"/></svg>
+        </div>
+        <div class="auth-box__brand">
+          <h1>Eng-Hub</h1>
+          <p>Gestão de projetos de engenharia</p>
+        </div>
+      </div>
+
+      <div class="auth-tabs">
+        <button type="button" class="auth-tab active" data-tab="login">Entrar</button>
+        <button type="button" class="auth-tab" data-tab="register">Cadastrar</button>
+      </div>
+
+      <form id="form-login" class="auth-form active">
+        <p class="auth-box__subtitle">Acesse sua conta para gerenciar projetos e arquivos.</p>
+        <div class="form-group">
+          <label for="login-user">Login</label>
+          <input type="text" id="login-user" name="username" required autocomplete="username" placeholder="Seu usuário">
+        </div>
+        <div class="form-group">
+          <label for="login-pass">Senha</label>
+          <input type="password" id="login-pass" name="password" required autocomplete="current-password" placeholder="Sua senha">
+        </div>
+        <button type="submit" class="btn btn--primary btn--block">Entrar</button>
+        <p class="form-feedback" role="status"></p>
+      </form>
+
+      <form id="form-register" class="auth-form" hidden>
+        <p class="auth-box__subtitle">Crie sua conta com login, senha, e-mail e telefone.</p>
+        <div class="form-group">
+          <label for="reg-user">Login *</label>
+          <input type="text" id="reg-user" name="username" required autocomplete="username" placeholder="Escolha um usuário">
+        </div>
+        <div class="form-group">
+          <label for="reg-pass">Senha *</label>
+          <input type="password" id="reg-pass" name="password" required autocomplete="new-password" placeholder="Mínimo 6 caracteres">
+        </div>
+        <div class="form-group">
+          <label for="reg-email">E-mail *</label>
+          <input type="email" id="reg-email" name="email" required autocomplete="email" placeholder="seu@email.com">
+        </div>
+        <div class="form-group">
+          <label for="reg-phone">Telefone *</label>
+          <input type="tel" id="reg-phone" name="phone" required autocomplete="tel" placeholder="(11) 99999-9999">
+        </div>
+        <button type="submit" class="btn btn--primary btn--block">Criar conta</button>
+        <p class="form-feedback" role="status"></p>
+      </form>
+    </div>
+
+    <p class="auth-footer">Armazene plantas, DWG, PDFs e documentos técnicos com sua equipe.</p>
+  </div>
+
+  <script src="js/auth.js"></script>
+</body>
+</html>

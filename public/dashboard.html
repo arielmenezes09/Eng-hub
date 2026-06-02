@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eng-Hub | Projetos</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="bg-grid">
+  <header class="app-header">
+    <a href="/dashboard" class="logo logo--light">
+      <div class="logo__mark">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#fff" d="M12 2L2 7v10l10 5 10-5V7L12 2zm0 2.2l7.5 3.75v7.5L12 19.8l-7.5-3.75v-7.5L12 4.2zM12 8a4 4 0 100 8 4 4 0 000-8z"/></svg>
+      </div>
+      <div class="logo__text">
+        <span class="logo__name">Eng-Hub</span>
+        <span class="logo__tag">Gestão de projetos</span>
+      </div>
+    </a>
+    <div class="app-header__actions">
+      <span id="user-info" class="user-badge"></span>
+      <button type="button" id="btn-logout" class="btn btn--ghost btn--sm">Sair</button>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <aside class="sidebar">
+      <div class="sidebar__header">
+        <h2>Projetos</h2>
+        <button type="button" id="btn-new-project" class="btn btn--primary btn--sm btn--icon" title="Novo projeto">+</button>
+      </div>
+      <ul id="project-list" class="project-list"></ul>
+      <div class="sidebar__activity">
+        <h3>Atividade recente</h3>
+        <ul id="activity-feed" class="activity-feed"></ul>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <div id="empty-state" class="empty-state">
+        <div class="empty-state__icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/><path d="M12 11v4M10 13h4"/></svg>
+        </div>
+        <h2>Selecione ou crie um projeto</h2>
+        <p>Armazene plantas, memoriais, DWG, PDFs e qualquer arquivo de engenharia em um só lugar.</p>
+        <button type="button" id="btn-new-project-empty" class="btn btn--primary">Criar primeiro projeto</button>
+      </div>
+
+      <div id="project-view" class="project-view hidden">
+        <div class="project-view__header">
+          <div>
+            <span class="section-label">Projeto ativo</span>
+            <h2 id="project-name"></h2>
+            <p id="project-desc" class="text-muted"></p>
+          </div>
+          <div class="project-view__actions">
+            <button type="button" id="btn-share" class="btn btn--outline btn--sm">Link do cliente</button>
+            <button type="button" id="btn-edit-project" class="btn btn--ghost btn--sm">Editar</button>
+            <button type="button" id="btn-delete-project" class="btn btn--danger btn--sm">Excluir</button>
+          </div>
+        </div>
+
+        <div class="upload-zone" id="upload-zone">
+          <input type="file" id="file-input" multiple hidden>
+          <div class="upload-zone__content">
+            <div class="upload-zone__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+            </div>
+            <p>Arraste arquivos aqui ou <button type="button" id="btn-browse" class="link-btn">selecione do computador</button></p>
+            <small>Todos os formatos · até 500 MB por arquivo</small>
+          </div>
+          <div id="upload-progress" class="upload-progress hidden"></div>
+        </div>
+
+        <div class="files-toolbar">
+          <h3>Arquivos <span id="file-count" class="badge">0</span></h3>
+          <input type="search" id="file-search" placeholder="Buscar arquivo..." class="search-input">
+        </div>
+        <div id="file-list" class="file-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="modal-project" class="modal">
+    <form id="form-project" method="dialog">
+      <h3 id="modal-project-title">Novo projeto</h3>
+      <div class="form-group">
+        <label for="project-name-input">Nome do projeto *</label>
+        <input type="text" id="project-name-input" required placeholder="Ex: Residencial Solar — Fase 2">
+      </div>
+      <div class="form-group">
+        <label for="project-desc-input">Descrição</label>
+        <textarea id="project-desc-input" rows="3" placeholder="Detalhes do projeto..."></textarea>
+      </div>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" data-close>Cancelar</button>
+        <button type="submit" class="btn btn--primary">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="modal-share" class="modal">
+    <h3>Link de visualização para cliente</h3>
+    <p class="text-muted">O cliente poderá <strong>apenas visualizar e baixar</strong> os arquivos, sem editar ou excluir.</p>
+    <div class="share-link-box">
+      <input type="text" id="share-link" readonly>
+      <button type="button" id="btn-copy-link" class="btn btn--primary btn--sm">Copiar</button>
+    </div>
+    <button type="button" id="btn-regenerate-link" class="btn btn--ghost btn--sm">Gerar novo link</button>
+    <div class="modal__actions">
+      <button type="button" class="btn btn--primary" data-close>Fechar</button>
+    </div>
+  </dialog>
+
+  <script src="/js/dashboard.js"></script>
+</body>
+</html>

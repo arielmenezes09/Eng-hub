@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eng-Hub | Visualização do Cliente</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="client-page bg-grid">
+  <header class="client-header">
+    <div class="client-header__brand">
+      <div class="logo__mark">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L2 7v10l10 5 10-5V7L12 2zm0 2.2l7.5 3.75v7.5L12 19.8l-7.5-3.75v-7.5L12 4.2zM12 8a4 4 0 100 8 4 4 0 000-8z" fill="#fff"/></svg>
+      </div>
+      <div class="client-header__info">
+        <small>Eng-Hub · Visualização do projeto</small>
+        <h1 id="client-project-name">Carregando...</h1>
+      </div>
+    </div>
+    <span class="client-badge">Somente leitura</span>
+  </header>
+
+  <main class="client-main">
+    <div class="client-meta">
+      <p id="client-project-desc" class="client-desc"></p>
+      <p id="client-updated" class="text-muted"></p>
+    </div>
+
+    <div id="client-loading" class="loading">Carregando arquivos...</div>
+    <div id="client-error" class="error-box hidden"></div>
+
+    <div id="client-files" class="client-files hidden">
+      <h2>Arquivos do projeto <span id="client-file-count" class="badge">0</span></h2>
+      <div id="client-file-list" class="file-list"></div>
+    </div>
+  </main>
+
+  <footer class="client-footer">
+    <p>Eng-Hub · Plataforma de arquivos para engenharia</p>
+  </footer>
+
+  <script src="/js/client.js"></script>
+</body>
+</html>
