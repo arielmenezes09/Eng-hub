@@ -60,14 +60,22 @@ const SqliteStore = (() => {
   };
 })();
 
+const cors = require('cors');
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cors({ origin: process.env.CORS_ORIGIN || '*', credentials: true }));
+
+app.set('trust proxy', 1);
 app.use(session({
   store: new SqliteStore(db),
   secret: process.env.SESSION_SECRET || 'eng-hub-secret-change-in-production',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 }
+  cookie: {
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    secure: process.env.NODE_ENV === 'production'
+  }
 }));
 
 app.use(express.static(path.join(__dirname, 'public')));
