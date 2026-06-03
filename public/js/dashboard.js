@@ -31,6 +31,7 @@ function formatSize(bytes) {
 }
 
 function formatDate(iso) {
+  if (!iso) return '';
   return new Date(iso.includes('Z') ? iso : iso + 'Z').toLocaleString('pt-BR');
 }
 
@@ -40,6 +41,7 @@ function fileExt(name) {
 }
 
 function escapeHtml(str) {
+  if (!str) return '';
   const d = document.createElement('div');
   d.textContent = str;
   return d.innerHTML;
@@ -59,49 +61,53 @@ function actionLabel(action, details) {
 }
 
 async function init() {
-  const auth = await api('/api/auth/check');
-  if (!auth.authenticated) {
-    window.location.href = '/';
-    return;
+  try {
+    const auth = await api('/api/auth/check');
+    if (!auth.authenticated) {
+      window.location.href = '/';
+      return;
+    }
+    currentUser = auth.user;
+    $('#user-info').textContent = currentUser.username;
+
+    await loadProjects();
+    await loadActivity();
+    startSync();
+    bindEvents();
+  } catch (err) {
+    console.error('Erro ao inicializar:', err);
   }
-  currentUser = auth.user;
-  $('#user-info').textContent = currentUser.username;
-
-  await loadProjects();
-  await loadActivity();
-  startSync();
-
-  bindEvents();
 }
 
-  // Fetch users for member selection
-  let allUsers = [];
-  async function loadUsers() {
-    allUsers = await api('/api/users');
-    const membersSelect = $('#project-members-select');
-    if (membersSelect) {
-      membersSelect.innerHTML = '';
-      allUsers.forEach(u => {
-        const opt = document.createElement('option');
-        opt.value = u.username;
-        opt.textContent = u.username;
-        membersSelect.appendChild(opt);
-      });
-    }
-  }
-
 async function loadProjects() {
-  projects = await api('/api/projects');
-  renderProjectList();
+  try {
+    projects = await api('/api/projects');
+    renderProjectList();
+  } catch (err) {
+    console.error('Erro ao carregar projetos:', err);
+  }
+}
+
+function getFilteredProjects() {
+  const filterStatus = $('#filter-status');
+  const filterDeadline = $('#filter-deadline');
+  const status = filterStatus ? filterStatus.value : '';
+  const deadline = filterDeadline ? filterDeadline.value : '';
+  return projects.filter(p => {
+    const matchStatus = !status || (p.status === status);
+    const matchDeadline = !deadline || (p.deadline && p.deadline.split('T')[0] <= deadline);
+    return matchStatus && matchDeadline;
+  });
 }
 
 function renderProjectList() {
   const list = $('#project-list');
-  if (!projects.length) {
+  if (!list) return;
+  const filtered = getFilteredProjects();
+  if (!filtered.length) {
     list.innerHTML = '<li style="padding:1rem;color:var(--text-muted);font-size:0.85rem">Nenhum projeto ainda</li>';
     return;
   }
-  const filtered = getFilteredProjects();
   list.innerHTML = filtered.map(p => `
     <li class="project-item ${currentProject?.id === p.id ? 'active' : ''}" data-id="${p.id}">
       <div class="project-item__name">${escapeHtml(p.name)}</div>
@@ -113,7 +119,6 @@ function renderProjectList() {
     </li>
   `).join('');
 
-  // Re-attach click handlers after rendering
   list.querySelectorAll('.project-item').forEach(item => {
     item.addEventListener('click', () => selectProject(Number(item.dataset.id)));
   });
@@ -123,12 +128,16 @@ async function selectProject(id) {
   currentProject = projects.find(p => p.id === id);
   if (!currentProject) return;
 
-  $('#empty-state').classList.add('hidden');
-  $('#project-view').classList.remove('hidden');
-  $('#project-name').textContent = currentProject.name;
-  $('#project-desc').textContent = currentProject.description || 'Sem descrição';
+  const emptyState = $('#empty-state');
+  const projectView = $('#project-view');
+  if (emptyState) emptyState.classList.add('hidden');
+  if (projectView) projectView.classList.remove('hidden');
 
-  // Fechar menu lateral no celular quando um projeto for selecionado
+  const nameEl = $('#project-name');
+  const descEl = $('#project-desc');
+  if (nameEl) nameEl.textContent = currentProject.name;
+  if (descEl) descEl.textContent = currentProject.description || 'Sem descrição';
+
   const sidebar = $('.sidebar');
   const overlay = $('#sidebar-overlay');
   if (sidebar) sidebar.classList.remove('sidebar--open');
@@ -140,58 +149,59 @@ async function selectProject(id) {
 
 async function loadFiles() {
   if (!currentProject) return;
-  files = await api(`/api/projects/${currentProject.id}/files`);
-  renderFiles();
+  try {
+    files = await api(`/api/projects/${currentProject.id}/files`);
+    renderFiles();
+  } catch (err) {
+    console.error('Erro ao carregar arquivos:', err);
+  }
 }
 
 function renderFiles(filter = '') {
   const q = filter.toLowerCase();
   const filtered = q ? files.filter(f => f.originalName.toLowerCase().includes(q)) : files;
 
-  $('#file-count').textContent = filtered.length;
+  const countEl = $('#file-count');
+  if (countEl) countEl.textContent = filtered.length;
   const list = $('#file-list');
+  if (!list) return;
 
   if (!filtered.length) {
     list.innerHTML = '<p class="text-muted" style="padding:1rem">Nenhum arquivo neste projeto</p>';
     return;
   }
 
-    // Render files with access check
-    const canAccess = currentProject.members && currentProject.members.includes(currentUser.username);
-    list.innerHTML = filtered.map(f => `
-      <div class="file-item" data-id="${f.id}">
-        <span class="file-item__icon">${escapeHtml(fileExt(f.originalName))}</span>
-        <div class="file-item__info">
-          <div class="file-item__name" title="${escapeHtml(f.originalName)}">${escapeHtml(f.originalName)}</div>
-          <div class="file-item__meta">${formatSize(f.size)} · ${escapeHtml(f.uploadedBy)} · ${formatDate(f.uploadedAt)}</div>
-        </div>
-        <div class="file-item__actions">
-          ${canAccess ? `<a href="/api/projects/${currentProject.id}/files/${f.id}/download" class="btn btn--outline btn--sm">Baixar</a>` : '<span class="text-muted">Sem acesso</span>'}
-          ${canAccess ? `<button type="button" class="btn btn--danger btn--sm btn-delete-file" data-id="${f.id}">Excluir</button>` : ''}
-        </div>
+  list.innerHTML = filtered.map(f => `
+    <div class="file-item" data-id="${f.id}">
+      <span class="file-item__icon">${escapeHtml(fileExt(f.originalName))}</span>
+      <div class="file-item__info">
+        <div class="file-item__name" title="${escapeHtml(f.originalName)}">${escapeHtml(f.originalName)}</div>
+        <div class="file-item__meta">${formatSize(f.size)} · ${escapeHtml(f.uploadedBy)} · ${formatDate(f.uploadedAt)}</div>
       </div>
-    `).join('');
+      <div class="file-item__actions">
+        <a href="/api/projects/${currentProject.id}/files/${f.id}/download" class="btn btn--outline btn--sm">Baixar</a>
+        <button type="button" class="btn btn--danger btn--sm btn-delete-file" data-id="${f.id}">Excluir</button>
+      </div>
+    </div>
+  `).join('');
 
-
-    // Ensure only members can delete files
-    list.querySelectorAll('.btn-delete-file').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (!currentProject.members || !currentProject.members.includes(currentUser.username)) {
-          alert('Você não tem permissão para excluir este arquivo.');
-          return;
-        }
-        deleteFile(Number(btn.dataset.id));
-      });
-    });
+  list.querySelectorAll('.btn-delete-file').forEach(btn => {
+    btn.addEventListener('click', () => deleteFile(Number(btn.dataset.id)));
+  });
 }
 
 async function loadActivity() {
-  const items = await api('/api/activity');
-  renderActivity(items);
+  try {
+    const items = await api('/api/activity');
+    renderActivity(items);
+  } catch (err) {
+    console.error('Erro ao carregar atividade:', err);
+  }
 }
 
 function renderActivity(items) {
   const feed = $('#activity-feed');
+  if (!feed) return;
   if (!items.length) {
     feed.innerHTML = '<li>Nenhuma atividade</li>';
     return;
@@ -225,101 +235,113 @@ function startSync() {
   }, 5000);
 }
 
-async function openProjectModal(edit = false) {
+// Abre o modal de projeto (criação ou edição)
+function openProjectModal(edit = false) {
   const modal = $('#modal-project');
-  // Ensure members list is loaded
-  await loadUsers();
-  // Populate fields when editing
+  if (!modal) return;
+
+  const titleEl = $('#modal-project-title');
+  const nameInput = $('#project-name-input');
+  const descInput = $('#project-desc-input');
+  const deadlineInput = $('#project-deadline-input');
+  const statusSelect = $('#project-status-select');
+
   if (edit && currentProject) {
-    $('#project-deadline-input').value = currentProject.deadline ? currentProject.deadline.split('T')[0] : '';
-    $('#project-status-select').value = currentProject.status || '';
-    // Set selected members
-    const membersSelect = $('#project-members-select');
-    if (membersSelect) {
-      Array.from(membersSelect.options).forEach(opt => {
-        opt.selected = currentProject.members && currentProject.members.includes(opt.value);
-      });
-    }
+    if (titleEl) titleEl.textContent = 'Editar projeto';
+    if (nameInput) nameInput.value = currentProject.name;
+    if (descInput) descInput.value = currentProject.description || '';
+    if (deadlineInput) deadlineInput.value = currentProject.deadline ? currentProject.deadline.split('T')[0] : '';
+    if (statusSelect) statusSelect.value = currentProject.status || '';
   } else {
-    $('#project-deadline-input').value = '';
-    $('#project-status-select').value = '';
-    const membersSelect = $('#project-members-select');
-    if (membersSelect) membersSelect.value = '';
+    if (titleEl) titleEl.textContent = 'Novo projeto';
+    if (nameInput) nameInput.value = '';
+    if (descInput) descInput.value = '';
+    if (deadlineInput) deadlineInput.value = '';
+    if (statusSelect) statusSelect.value = '';
   }
-  $('#modal-project-title').textContent = edit ? 'Editar projeto' : 'Novo projeto';
-  $('#project-name-input').value = edit ? currentProject.name : '';
-  $('#project-desc-input').value = edit ? (currentProject.description || '') : '';
+
   modal.showModal();
 }
 
-
-
 async function saveProject(e) {
   e.preventDefault();
-  const name = $('#project-name-input').value.trim();
-  const description = $('#project-desc-input').value.trim();
-  const deadline = $('#project-deadline-input').value; // ISO date string (yyyy-mm-dd)
-  const status = $('#project-status-select').value;
 
-    const selectedMembers = Array.from($('#project-members-select').selectedOptions).map(o => o.value);
-    if (selectedMembers.length > 10) {
-      alert('Selecione no máximo 10 membros.');
-      return;
-    }
-    const payload = { name, description, deadline: deadline || null, status: status || null, members: selectedMembers };
+  const name = $('#project-name-input')?.value.trim();
+  const description = $('#project-desc-input')?.value.trim() || '';
+  const deadline = $('#project-deadline-input')?.value || null;
+  const status = $('#project-status-select')?.value || null;
 
-  if (currentProject && $('#modal-project-title').textContent.includes('Editar')) {
-    // Update existing project
-    currentProject = await api(`/api/projects/${currentProject.id}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload)
-    });
-    $('#project-name').textContent = currentProject.name;
-    $('#project-desc').textContent = currentProject.description || 'Sem descrição';
-  } else {
-  
-    // Create new project
-    const project = await api('/api/projects', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-    projects.unshift(project);
-    await selectProject(project.id);
-
+  if (!name) {
+    alert('Nome do projeto é obrigatório');
+    return;
   }
 
-  await loadProjects();
-  await loadActivity();
-  $('#modal-project').close();
+  const payload = { name, description, deadline, status };
+  const isEditing = currentProject && $('#modal-project-title')?.textContent.includes('Editar');
+
+  try {
+    if (isEditing) {
+      const updated = await api(`/api/projects/${currentProject.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      currentProject = updated;
+      const nameEl = $('#project-name');
+      const descEl = $('#project-desc');
+      if (nameEl) nameEl.textContent = updated.name;
+      if (descEl) descEl.textContent = updated.description || 'Sem descrição';
+    } else {
+      const project = await api('/api/projects', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      projects.unshift(project);
+      await selectProject(project.id);
+    }
+
+    await loadProjects();
+    await loadActivity();
+    $('#modal-project').close();
+  } catch (err) {
+    alert('Erro ao salvar projeto: ' + err.message);
+  }
 }
-
-
 
 async function deleteProject() {
   if (!currentProject) return;
   if (!confirm(`Excluir o projeto "${currentProject.name}" e todos os arquivos?`)) return;
 
-  await api(`/api/projects/${currentProject.id}`, { method: 'DELETE' });
-  currentProject = null;
-  $('#project-view').classList.add('hidden');
-  $('#empty-state').classList.remove('hidden');
-  await loadProjects();
-  await loadActivity();
+  try {
+    await api(`/api/projects/${currentProject.id}`, { method: 'DELETE' });
+    currentProject = null;
+    const projectView = $('#project-view');
+    const emptyState = $('#empty-state');
+    if (projectView) projectView.classList.add('hidden');
+    if (emptyState) emptyState.classList.remove('hidden');
+    await loadProjects();
+    await loadActivity();
+  } catch (err) {
+    alert('Erro ao excluir projeto: ' + err.message);
+  }
 }
 
 function showShareModal() {
   if (!currentProject) return;
   const link = `${window.location.origin}/client/${currentProject.clientToken}`;
-  $('#share-link').value = link;
-  $('#modal-share').showModal();
+  const shareLinkEl = $('#share-link');
+  if (shareLinkEl) shareLinkEl.value = link;
+  const modal = $('#modal-share');
+  if (modal) modal.showModal();
 }
 
 async function uploadFiles(fileList) {
   if (!currentProject || !fileList.length) return;
 
   const progress = $('#upload-progress');
-  progress.classList.remove('hidden');
-  progress.innerHTML = '';
+  if (progress) {
+    progress.classList.remove('hidden');
+    progress.innerHTML = '';
+  }
 
   for (const file of fileList) {
     const item = document.createElement('div');
@@ -328,21 +350,20 @@ async function uploadFiles(fileList) {
       <span>${escapeHtml(file.name)}</span>
       <div class="upload-progress__bar"><div class="upload-progress__fill" style="width:0%"></div></div>
     `;
-    progress.appendChild(item);
+    if (progress) progress.appendChild(item);
     const fill = item.querySelector('.upload-progress__fill');
 
     const fd = new FormData();
     fd.append('file', file);
 
     try {
-      fill.style.width = '50%';
+      if (fill) fill.style.width = '50%';
       await api(`/api/projects/${currentProject.id}/files`, { method: 'POST', body: fd });
-      fill.style.width = '100%';
-      fill.style.background = 'var(--success)';
+      if (fill) { fill.style.width = '100%'; fill.style.background = 'var(--success)'; }
     } catch (err) {
-      fill.style.width = '100%';
-      fill.style.background = 'var(--danger)';
-      item.querySelector('span').textContent += ` — Erro: ${err.message}`;
+      if (fill) { fill.style.width = '100%'; fill.style.background = 'var(--danger)'; }
+      const span = item.querySelector('span');
+      if (span) span.textContent += ` — Erro: ${err.message}`;
     }
   }
 
@@ -351,83 +372,136 @@ async function uploadFiles(fileList) {
   await loadActivity();
   lastSync = new Date().toISOString();
 
-  setTimeout(() => progress.classList.add('hidden'), 2000);
+  setTimeout(() => { if (progress) progress.classList.add('hidden'); }, 2000);
 }
 
 async function deleteFile(fileId) {
   if (!confirm('Excluir este arquivo?')) return;
-  await api(`/api/projects/${currentProject.id}/files/${fileId}`, { method: 'DELETE' });
-  await loadFiles();
-  await loadProjects();
-  await loadActivity();
+  try {
+    await api(`/api/projects/${currentProject.id}/files/${fileId}`, { method: 'DELETE' });
+    await loadFiles();
+    await loadProjects();
+    await loadActivity();
+  } catch (err) {
+    alert('Erro ao excluir arquivo: ' + err.message);
+  }
 }
 
 function bindEvents() {
-  $('#btn-logout').addEventListener('click', async () => {
+  // Logout
+  const btnLogout = $('#btn-logout');
+  if (btnLogout) btnLogout.addEventListener('click', async () => {
     await api('/api/auth/logout', { method: 'POST' });
     window.location.href = '/';
   });
 
-  // Filter UI events
-  const filterStatus = $('#filter-status');
-  const filterDeadline = $('#filter-deadline');
-  if (filterStatus) filterStatus.addEventListener('change', renderProjectList);
-  if (filterDeadline) filterDeadline.addEventListener('change', renderProjectList);
+  // Botão "+" da sidebar
+  const btnNewProject = $('#btn-new-project');
+  if (btnNewProject) btnNewProject.addEventListener('click', () => openProjectModal(false));
 
-  // Helper to filter projects based on UI selections
-  window.getFilteredProjects = function () {
-    const status = filterStatus ? filterStatus.value : '';
-    const deadline = filterDeadline ? filterDeadline.value : '';
-    return projects.filter(p => {
-      const matchStatus = !status || (p.status === status);
-      const matchDeadline = !deadline || (p.deadline && p.deadline.split('T')[0] <= deadline);
-      return matchStatus && matchDeadline;
-    });
-  };
+  // Botão "Criar primeiro projeto" na tela inicial
+  const btnNewProjectEmpty = $('#btn-new-project-empty');
+  if (btnNewProjectEmpty) btnNewProjectEmpty.addEventListener('click', () => openProjectModal(false));
 
-  $('#btn-new-project').addEventListener('click', () => openProjectModal(false));
+  // Botão Editar projeto
+  const btnEditProject = $('#btn-edit-project');
+  if (btnEditProject) btnEditProject.addEventListener('click', () => openProjectModal(true));
 
+  // Botão Excluir projeto
+  const btnDeleteProject = $('#btn-delete-project');
+  if (btnDeleteProject) btnDeleteProject.addEventListener('click', deleteProject);
 
+  // Botão Link do cliente
+  const btnShare = $('#btn-share');
+  if (btnShare) btnShare.addEventListener('click', showShareModal);
 
-  $('#btn-delete-project').addEventListener('click', deleteProject);
-  $('#btn-share').addEventListener('click', showShareModal);
+  // Formulário do modal de projeto
+  const formProject = $('#form-project');
+  if (formProject) formProject.addEventListener('submit', saveProject);
 
-  $('#form-project').addEventListener('submit', saveProject);
-
+  // Fechar modais
   $$('[data-close]').forEach(btn => {
     btn.addEventListener('click', () => btn.closest('dialog').close());
   });
 
-  $('#btn-copy-link').addEventListener('click', () => {
-    navigator.clipboard.writeText($('#share-link').value);
-    $('#btn-copy-link').textContent = 'Copiado!';
-    setTimeout(() => { $('#btn-copy-link').textContent = 'Copiar'; }, 2000);
+  // Copiar link
+  const btnCopyLink = $('#btn-copy-link');
+  if (btnCopyLink) btnCopyLink.addEventListener('click', () => {
+    const shareLinkEl = $('#share-link');
+    if (shareLinkEl) navigator.clipboard.writeText(shareLinkEl.value);
+    btnCopyLink.textContent = 'Copiado!';
+    setTimeout(() => { btnCopyLink.textContent = 'Copiar'; }, 2000);
   });
 
-  $('#btn-regenerate-link').addEventListener('click', async () => {
+  // Gerar novo link
+  const btnRegenerateLink = $('#btn-regenerate-link');
+  if (btnRegenerateLink) btnRegenerateLink.addEventListener('click', async () => {
     if (!confirm('Gerar novo link? O link anterior deixará de funcionar.')) return;
-    const data = await api(`/api/projects/${currentProject.id}/regenerate-link`, { method: 'POST' });
-    currentProject.clientToken = data.clientToken;
-    $('#share-link').value = `${window.location.origin}/client/${data.clientToken}`;
-    await loadActivity();
+    try {
+      const data = await api(`/api/projects/${currentProject.id}/regenerate-link`, { method: 'POST' });
+      currentProject.clientToken = data.clientToken;
+      const shareLinkEl = $('#share-link');
+      if (shareLinkEl) shareLinkEl.value = `${window.location.origin}/client/${data.clientToken}`;
+      await loadActivity();
+    } catch (err) {
+      alert('Erro ao gerar link: ' + err.message);
+    }
   });
 
-  $('#btn-browse').addEventListener('click', () => $('#file-input').click());
-  $('#file-input').addEventListener('change', (e) => {
+  // Upload de arquivos
+  const btnBrowse = $('#btn-browse');
+  if (btnBrowse) btnBrowse.addEventListener('click', () => $('#file-input').click());
+
+  const fileInput = $('#file-input');
+  if (fileInput) fileInput.addEventListener('change', (e) => {
     uploadFiles([...e.target.files]);
     e.target.value = '';
   });
 
   const zone = $('#upload-zone');
-  zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
-  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
-  zone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    zone.classList.remove('dragover');
-    uploadFiles([...e.dataTransfer.files]);
+  if (zone) {
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+    zone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      zone.classList.remove('dragover');
+      uploadFiles([...e.dataTransfer.files]);
+    });
+  }
+
+  // Busca de arquivos
+  const fileSearch = $('#file-search');
+  if (fileSearch) fileSearch.addEventListener('input', (e) => renderFiles(e.target.value));
+
+  // Filtros
+  const filterStatus = $('#filter-status');
+  const filterDeadline = $('#filter-deadline');
+  if (filterStatus) filterStatus.addEventListener('change', renderProjectList);
+  if (filterDeadline) filterDeadline.addEventListener('change', renderProjectList);
+
+  // Tema
+  const btnTheme = $('#btn-theme');
+  if (btnTheme) btnTheme.addEventListener('click', () => {
+    document.documentElement.classList.toggle('dark-theme');
+    localStorage.setItem('theme', document.documentElement.classList.contains('dark-theme') ? 'dark' : 'light');
   });
 
-  $('#file-search').addEventListener('input', (e) => renderFiles(e.target.value));
+  // Menu mobile
+  const btnMenu = $('#btn-menu');
+  const sidebar = $('.sidebar');
+  const overlay = $('#sidebar-overlay');
+  if (btnMenu && sidebar) {
+    btnMenu.addEventListener('click', () => {
+      sidebar.classList.toggle('sidebar--open');
+      if (overlay) overlay.classList.toggle('active');
+    });
+  }
+  if (overlay && sidebar) {
+    overlay.addEventListener('click', () => {
+      sidebar.classList.remove('sidebar--open');
+      overlay.classList.remove('active');
+    });
+  }
 }
 
 init();
