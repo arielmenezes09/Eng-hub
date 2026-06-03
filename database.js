@@ -1,83 +1,82 @@
-const Database = require('better-sqlite3');
-const path = require('path');
-const fs = require('fs');
+const { Pool } = require('pg');
 
-const dbPath = process.env.DATABASE_PATH || path.join(__dirname, 'data', 'eng-hub.db');
-fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+// Conexão com PostgreSQL via DATABASE_URL (padrão Render/Heroku/Railway)
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
 
-const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+// Inicializa as tabelas
+async function initDatabase() {
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE,
+        phone TEXT NOT NULL,
+        reset_code TEXT,
+        reset_expires TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    password_hash TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE,
-    phone TEXT NOT NULL,
-    reset_code TEXT,
-    reset_expires TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
+      CREATE TABLE IF NOT EXISTS projects (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        client_token TEXT NOT NULL UNIQUE,
+        created_by INTEGER NOT NULL REFERENCES users(id),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
 
-  CREATE TABLE IF NOT EXISTS projects (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    description TEXT DEFAULT '',
-    client_token TEXT NOT NULL UNIQUE,
-    created_by INTEGER NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (created_by) REFERENCES users(id)
-  );
+      CREATE TABLE IF NOT EXISTS files (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        original_name TEXT NOT NULL,
+        stored_name TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size BIGINT NOT NULL,
+        uploaded_by INTEGER NOT NULL REFERENCES users(id),
+        uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
 
-  CREATE TABLE IF NOT EXISTS files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER NOT NULL,
-    original_name TEXT NOT NULL,
-    stored_name TEXT NOT NULL,
-    mime_type TEXT NOT NULL,
-    size INTEGER NOT NULL,
-    uploaded_by INTEGER NOT NULL,
-    uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    FOREIGN KEY (uploaded_by) REFERENCES users(id)
-  );
+      CREATE TABLE IF NOT EXISTS activity (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        action TEXT NOT NULL,
+        details TEXT DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
 
-  CREATE TABLE IF NOT EXISTS activity (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER,
-    user_id INTEGER NOT NULL,
-    action TEXT NOT NULL,
-    details TEXT DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
+      CREATE TABLE IF NOT EXISTS project_members (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(project_id, user_id)
+      );
 
-  CREATE TABLE IF NOT EXISTS project_members (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    added_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id),
-    UNIQUE(project_id, user_id)
-  );
-`);
+      CREATE TABLE IF NOT EXISTS sessions (
+        sid TEXT PRIMARY KEY,
+        sess JSON NOT NULL,
+        expired TIMESTAMPTZ NOT NULL
+      );
 
-// Migração segura para adicionar colunas de recuperação em bancos existentes
-try {
-  db.exec("ALTER TABLE users ADD COLUMN reset_code TEXT;");
-} catch (e) {
-  // A coluna já existe ou ocorreu outro erro aceitável
+      CREATE INDEX IF NOT EXISTS idx_sessions_expired ON sessions (expired);
+      CREATE INDEX IF NOT EXISTS idx_project_members_project ON project_members (project_id);
+      CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members (user_id);
+      CREATE INDEX IF NOT EXISTS idx_files_project ON files (project_id);
+      CREATE INDEX IF NOT EXISTS idx_activity_project ON activity (project_id);
+      CREATE INDEX IF NOT EXISTS idx_activity_created ON activity (created_at);
+    `);
+    console.log('Banco de dados PostgreSQL inicializado com sucesso');
+  } finally {
+    client.release();
+  }
 }
 
-try {
-  db.exec("ALTER TABLE users ADD COLUMN reset_expires TEXT;");
-} catch (e) {
-  // A coluna já existe ou ocorreu outro erro aceitável
-}
-
-module.exports = db;
+module.exports = { pool, initDatabase };
