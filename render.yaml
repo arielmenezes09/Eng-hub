@@ -10,4 +10,9 @@ services:
         value: "your-secret-here"
       - key: NODE_ENV
         value: "production"
-    # Upload directory (SQLite DB) will be persisted by Render automatically
+  - type: static_site
+    name: eng-hub-frontend
+    staticPublishPath: frontend/public
+    buildCommand: npm install
+    env: static
+    plan: free
