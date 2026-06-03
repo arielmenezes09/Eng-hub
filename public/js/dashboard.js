@@ -4,6 +4,8 @@ let currentProject = null;
 let files = [];
 let lastSync = new Date().toISOString();
 let syncTimer = null;
+let selectedMembers = []; // { id, username }
+let searchTimeout = null;
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -138,6 +140,8 @@ async function selectProject(id) {
   if (nameEl) nameEl.textContent = currentProject.name;
   if (descEl) descEl.textContent = currentProject.description || 'Sem descrição';
 
+  renderProjectMembers(currentProject.members || []);
+
   const sidebar = $('.sidebar');
   const overlay = $('#sidebar-overlay');
   if (sidebar) sidebar.classList.remove('sidebar--open');
@@ -235,6 +239,153 @@ function startSync() {
   }, 5000);
 }
 
+// --- Members rendering & autocomplete ---
+
+function renderProjectMembers(members) {
+  const list = $('#project-members-list');
+  const count = $('#members-count');
+  if (!list) return;
+
+  if (count) count.textContent = members.length;
+
+  if (!members.length) {
+    list.innerHTML = '<span class="project-members-list--empty">Nenhum responsável atribuído</span>';
+    return;
+  }
+
+  list.innerHTML = members.map(m => `
+    <span class="member-chip">
+      <span class="member-chip__avatar">${escapeHtml(m.username.charAt(0).toUpperCase())}</span>
+      ${escapeHtml(m.username)}
+    </span>
+  `).join('');
+}
+
+function renderSelectedMembers() {
+  const container = $('#members-selected');
+  if (!container) return;
+
+  container.innerHTML = selectedMembers.map(m => `
+    <span class="member-tag" data-id="${m.id}">
+      ${escapeHtml(m.username)}
+      <button type="button" data-remove-id="${m.id}" title="Remover">&times;</button>
+    </span>
+  `).join('');
+
+  // Bind remove buttons
+  container.querySelectorAll('button[data-remove-id]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = Number(btn.dataset.removeId);
+      selectedMembers = selectedMembers.filter(m => m.id !== id);
+      renderSelectedMembers();
+    });
+  });
+
+  // Update placeholder
+  const input = $('#members-search-input');
+  if (input) {
+    input.placeholder = selectedMembers.length >= 8 ? 'Limite atingido (8)' : 'Buscar usuário cadastrado...';
+    input.disabled = selectedMembers.length >= 8;
+  }
+}
+
+async function searchUsers(query) {
+  if (!query || query.length < 1) {
+    hideMembersSuggestions();
+    return;
+  }
+
+  try {
+    const users = await api(`/api/users/search?q=${encodeURIComponent(query)}`);
+    // Filter out already selected members
+    const filtered = users.filter(u => !selectedMembers.some(m => m.id === u.id));
+    showMembersSuggestions(filtered);
+  } catch (err) {
+    console.error('Erro ao buscar usuários:', err);
+  }
+}
+
+function showMembersSuggestions(users) {
+  const list = $('#members-suggestions');
+  if (!list) return;
+
+  if (!users.length) {
+    list.innerHTML = '<li style="pointer-events:none;color:var(--text-muted)">Nenhum usuário encontrado</li>';
+    list.classList.remove('hidden');
+    return;
+  }
+
+  list.innerHTML = users.map(u => `
+    <li data-user-id="${u.id}" data-username="${escapeHtml(u.username)}">
+      <span class="suggestion-avatar">${escapeHtml(u.username.charAt(0).toUpperCase())}</span>
+      ${escapeHtml(u.username)}
+    </li>
+  `).join('');
+
+  list.classList.remove('hidden');
+
+  // Bind click
+  list.querySelectorAll('li[data-user-id]').forEach(item => {
+    item.addEventListener('click', () => {
+      const id = Number(item.dataset.userId);
+      const username = item.dataset.username;
+      if (selectedMembers.length < 8 && !selectedMembers.some(m => m.id === id)) {
+        selectedMembers.push({ id, username });
+        renderSelectedMembers();
+      }
+      const input = $('#members-search-input');
+      if (input) input.value = '';
+      hideMembersSuggestions();
+    });
+  });
+}
+
+function hideMembersSuggestions() {
+  const list = $('#members-suggestions');
+  if (list) {
+    list.classList.add('hidden');
+    list.innerHTML = '';
+  }
+}
+
+function bindMembersInput() {
+  const input = $('#members-search-input');
+  if (!input) return;
+
+  input.addEventListener('input', () => {
+    clearTimeout(searchTimeout);
+    const q = input.value.trim();
+    if (q.length < 1) {
+      hideMembersSuggestions();
+      return;
+    }
+    searchTimeout = setTimeout(() => searchUsers(q), 250);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Backspace' && !input.value && selectedMembers.length > 0) {
+      selectedMembers.pop();
+      renderSelectedMembers();
+    }
+    if (e.key === 'Escape') {
+      hideMembersSuggestions();
+    }
+  });
+
+  // Close suggestions on outside click
+  document.addEventListener('click', (e) => {
+    const wrapper = e.target.closest('.members-input-wrapper');
+    if (!wrapper) hideMembersSuggestions();
+  });
+
+  // Focus input when clicking wrapper
+  const wrapper = input.closest('.members-input-wrapper');
+  if (wrapper) {
+    wrapper.addEventListener('click', () => input.focus());
+  }
+}
+
 // Abre o modal de projeto (criação ou edição)
 function openProjectModal(edit = false) {
   const modal = $('#modal-project');
@@ -252,13 +403,21 @@ function openProjectModal(edit = false) {
     if (descInput) descInput.value = currentProject.description || '';
     if (deadlineInput) deadlineInput.value = currentProject.deadline ? currentProject.deadline.split('T')[0] : '';
     if (statusSelect) statusSelect.value = currentProject.status || '';
+    // Load existing members
+    selectedMembers = (currentProject.members || []).map(m => ({ id: m.id, username: m.username }));
   } else {
     if (titleEl) titleEl.textContent = 'Novo projeto';
     if (nameInput) nameInput.value = '';
     if (descInput) descInput.value = '';
     if (deadlineInput) deadlineInput.value = '';
     if (statusSelect) statusSelect.value = '';
+    selectedMembers = [];
   }
+
+  renderSelectedMembers();
+  hideMembersSuggestions();
+  const membersInput = $('#members-search-input');
+  if (membersInput) membersInput.value = '';
 
   modal.showModal();
 }
@@ -270,13 +429,14 @@ async function saveProject(e) {
   const description = $('#project-desc-input')?.value.trim() || '';
   const deadline = $('#project-deadline-input')?.value || null;
   const status = $('#project-status-select')?.value || null;
+  const memberIds = selectedMembers.map(m => m.id);
 
   if (!name) {
     alert('Nome do projeto é obrigatório');
     return;
   }
 
-  const payload = { name, description, deadline, status };
+  const payload = { name, description, deadline, status, memberIds };
   const isEditing = currentProject && $('#modal-project-title')?.textContent.includes('Editar');
 
   try {
@@ -290,6 +450,7 @@ async function saveProject(e) {
       const descEl = $('#project-desc');
       if (nameEl) nameEl.textContent = updated.name;
       if (descEl) descEl.textContent = updated.description || 'Sem descrição';
+      renderProjectMembers(updated.members || []);
     } else {
       const project = await api('/api/projects', {
         method: 'POST',
@@ -388,6 +549,9 @@ async function deleteFile(fileId) {
 }
 
 function bindEvents() {
+  // Members autocomplete
+  bindMembersInput();
+
   // Logout
   const btnLogout = $('#btn-logout');
   if (btnLogout) btnLogout.addEventListener('click', async () => {
@@ -466,6 +630,18 @@ function bindEvents() {
       e.preventDefault();
       zone.classList.remove('dragover');
       uploadFiles([...e.dataTransfer.files]);
+    });
+    // Touch/click on entire upload zone opens file picker
+    zone.addEventListener('click', (e) => {
+      if (e.target.id !== 'btn-browse' && !e.target.closest('#btn-browse')) {
+        $('#file-input').click();
+      }
+    });
+    zone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        $('#file-input').click();
+      }
     });
   }
 

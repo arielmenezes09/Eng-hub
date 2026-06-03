@@ -123,6 +123,7 @@ function formatFile(row) {
 }
 
 function formatProject(row) {
+  const members = getProjectMembers(row.id);
   return {
     id: row.id,
     name: row.name,
@@ -131,7 +132,8 @@ function formatProject(row) {
     createdBy: row.creator_name,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    fileCount: row.file_count || 0
+    fileCount: row.file_count || 0,
+    members
   };
 }
 
@@ -283,6 +285,81 @@ app.post('/api/auth/reset-password', (req, res) => {
   res.json({ message: 'Senha redefinida com sucesso!' });
 });
 
+// --- Users (search for adding members) ---
+
+app.get('/api/users/search', requireAuth, (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (!q || q.length < 1) {
+    return res.json([]);
+  }
+
+  const users = db.prepare(`
+    SELECT id, username FROM users
+    WHERE username LIKE ? COLLATE NOCASE
+    ORDER BY username ASC
+    LIMIT 10
+  `).all(`%${q}%`);
+
+  res.json(users);
+});
+
+// --- Project Members ---
+
+function getProjectMembers(projectId) {
+  return db.prepare(`
+    SELECT u.id, u.username FROM project_members pm
+    JOIN users u ON u.id = pm.user_id
+    WHERE pm.project_id = ?
+    ORDER BY pm.added_at ASC
+  `).all(projectId);
+}
+
+function setProjectMembers(projectId, memberIds) {
+  // Remove existing members
+  db.prepare('DELETE FROM project_members WHERE project_id = ?').run(projectId);
+
+  // Insert new members (max 8)
+  const validIds = memberIds.slice(0, 8);
+  const insert = db.prepare('INSERT OR IGNORE INTO project_members (project_id, user_id) VALUES (?, ?)');
+  for (const userId of validIds) {
+    // Verify user exists
+    const user = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
+    if (user) {
+      insert.run(projectId, userId);
+    }
+  }
+}
+
+app.get('/api/projects/:id/members', requireAuth, (req, res) => {
+  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+
+  const members = getProjectMembers(req.params.id);
+  res.json(members);
+});
+
+app.put('/api/projects/:id/members', requireAuth, (req, res) => {
+  const { memberIds } = req.body;
+  const project = db.prepare('SELECT id, name FROM projects WHERE id = ?').get(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+
+  if (!Array.isArray(memberIds)) {
+    return res.status(400).json({ error: 'memberIds deve ser um array' });
+  }
+
+  if (memberIds.length > 8) {
+    return res.status(400).json({ error: 'Máximo de 8 responsáveis por projeto' });
+  }
+
+  setProjectMembers(req.params.id, memberIds);
+
+  db.prepare("UPDATE projects SET updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+  logActivity(req.session.userId, project.id, 'members_update', project.name);
+
+  const members = getProjectMembers(req.params.id);
+  res.json(members);
+});
+
 // --- Projects ---
 
 app.get('/api/projects', requireAuth, (req, res) => {
@@ -298,7 +375,7 @@ app.get('/api/projects', requireAuth, (req, res) => {
 });
 
 app.post('/api/projects', requireAuth, (req, res) => {
-  const { name, description } = req.body;
+  const { name, description, memberIds } = req.body;
 
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'Nome do projeto é obrigatório' });
@@ -308,6 +385,11 @@ app.post('/api/projects', requireAuth, (req, res) => {
   const result = db.prepare(
     'INSERT INTO projects (name, description, client_token, created_by) VALUES (?, ?, ?, ?)'
   ).run(name.trim(), (description || '').trim(), token, req.session.userId);
+
+  // Save members if provided
+  if (Array.isArray(memberIds) && memberIds.length > 0) {
+    setProjectMembers(result.lastInsertRowid, memberIds);
+  }
 
   logActivity(req.session.userId, result.lastInsertRowid, 'project_create', name.trim());
 
@@ -331,7 +413,7 @@ app.get('/api/projects/:id', requireAuth, (req, res) => {
 });
 
 app.put('/api/projects/:id', requireAuth, (req, res) => {
-  const { name, description } = req.body;
+  const { name, description, memberIds } = req.body;
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
 
   if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
@@ -343,6 +425,11 @@ app.put('/api/projects/:id', requireAuth, (req, res) => {
     description !== undefined ? description.trim() : project.description,
     req.params.id
   );
+
+  // Update members if provided
+  if (Array.isArray(memberIds)) {
+    setProjectMembers(req.params.id, memberIds);
+  }
 
   logActivity(req.session.userId, project.id, 'project_update', name || project.name);
 
