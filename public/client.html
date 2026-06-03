@@ -2,7 +2,11 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#1e3a5f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="format-detection" content="telephone=no">
   <title>Eng-Hub | Visualização do Cliente</title>
   <script>
     (function() {
@@ -26,25 +30,25 @@
       </div>
     </div>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
-      <button type="button" id="btn-theme" class="btn btn--ghost btn--icon btn--icon-theme" title="Alternar tema" style="color: rgba(255,255,255,0.75);">
+      <button type="button" id="btn-theme" class="btn btn--ghost btn--icon btn--icon-theme" title="Alternar tema" aria-label="Alternar tema claro/escuro" style="color: rgba(255,255,255,0.75);">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m11.314 11.314l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z"/></svg>
       </button>
       <span class="client-badge">Somente leitura</span>
     </div>
   </header>
 
-  <main class="client-main">
+  <main class="client-main" role="main">
     <div class="client-meta">
       <p id="client-project-desc" class="client-desc"></p>
       <p id="client-updated" class="text-muted"></p>
     </div>
 
-    <div id="client-loading" class="loading">Carregando arquivos...</div>
-    <div id="client-error" class="error-box hidden"></div>
+    <div id="client-loading" class="loading" role="status" aria-live="polite">Carregando arquivos...</div>
+    <div id="client-error" class="error-box hidden" role="alert" aria-live="assertive"></div>
 
     <div id="client-files" class="client-files hidden">
       <h2>Arquivos do projeto <span id="client-file-count" class="badge">0</span></h2>
-      <div id="client-file-list" class="file-list"></div>
+      <div id="client-file-list" class="file-list" role="list" aria-label="Lista de arquivos do projeto"></div>
     </div>
   </main>
 
