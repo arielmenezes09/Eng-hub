@@ -104,6 +104,35 @@ function requireAuth(req, res, next) {
   next();
 }
 
+// Middleware: verifica se o usuário é membro ou criador do projeto
+function requireProjectAccess(req, res, next) {
+  const projectId = req.params.id || req.params.projectId;
+  if (!projectId) return res.status(400).json({ error: 'ID do projeto não informado' });
+
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
+  if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+
+  const userId = req.session.userId;
+
+  // Criador sempre tem acesso
+  if (project.created_by === userId) {
+    req.project = project;
+    return next();
+  }
+
+  // Verifica se é membro do projeto
+  const isMember = db.prepare(
+    'SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?'
+  ).get(projectId, userId);
+
+  if (!isMember) {
+    return res.status(403).json({ error: 'Você não tem acesso a este projeto' });
+  }
+
+  req.project = project;
+  next();
+}
+
 function logActivity(userId, projectId, action, details = '') {
   db.prepare(
     'INSERT INTO activity (project_id, user_id, action, details) VALUES (?, ?, ?, ?)'
@@ -330,18 +359,14 @@ function setProjectMembers(projectId, memberIds) {
   }
 }
 
-app.get('/api/projects/:id/members', requireAuth, (req, res) => {
-  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
-
+app.get('/api/projects/:id/members', requireAuth, requireProjectAccess, (req, res) => {
   const members = getProjectMembers(req.params.id);
   res.json(members);
 });
 
-app.put('/api/projects/:id/members', requireAuth, (req, res) => {
+app.put('/api/projects/:id/members', requireAuth, requireProjectAccess, (req, res) => {
   const { memberIds } = req.body;
-  const project = db.prepare('SELECT id, name FROM projects WHERE id = ?').get(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+  const project = req.project;
 
   if (!Array.isArray(memberIds)) {
     return res.status(400).json({ error: 'memberIds deve ser um array' });
@@ -363,13 +388,16 @@ app.put('/api/projects/:id/members', requireAuth, (req, res) => {
 // --- Projects ---
 
 app.get('/api/projects', requireAuth, (req, res) => {
+  const userId = req.session.userId;
   const rows = db.prepare(`
     SELECT p.*, u.username AS creator_name,
       (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id) AS file_count
     FROM projects p
     JOIN users u ON u.id = p.created_by
+    WHERE p.created_by = ?
+      OR p.id IN (SELECT pm.project_id FROM project_members pm WHERE pm.user_id = ?)
     ORDER BY p.updated_at DESC
-  `).all();
+  `).all(userId, userId);
 
   res.json(rows.map(formatProject));
 });
@@ -386,10 +414,12 @@ app.post('/api/projects', requireAuth, (req, res) => {
     'INSERT INTO projects (name, description, client_token, created_by) VALUES (?, ?, ?, ?)'
   ).run(name.trim(), (description || '').trim(), token, req.session.userId);
 
-  // Save members if provided
-  if (Array.isArray(memberIds) && memberIds.length > 0) {
-    setProjectMembers(result.lastInsertRowid, memberIds);
+  // Sempre adiciona o criador como membro + os membros informados
+  const allMemberIds = Array.isArray(memberIds) ? [...memberIds] : [];
+  if (!allMemberIds.includes(req.session.userId)) {
+    allMemberIds.unshift(req.session.userId);
   }
+  setProjectMembers(result.lastInsertRowid, allMemberIds);
 
   logActivity(req.session.userId, result.lastInsertRowid, 'project_create', name.trim());
 
@@ -401,7 +431,7 @@ app.post('/api/projects', requireAuth, (req, res) => {
   res.status(201).json(formatProject(row));
 });
 
-app.get('/api/projects/:id', requireAuth, (req, res) => {
+app.get('/api/projects/:id', requireAuth, requireProjectAccess, (req, res) => {
   const row = db.prepare(`
     SELECT p.*, u.username AS creator_name,
       (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id) AS file_count
@@ -412,11 +442,9 @@ app.get('/api/projects/:id', requireAuth, (req, res) => {
   res.json(formatProject(row));
 });
 
-app.put('/api/projects/:id', requireAuth, (req, res) => {
+app.put('/api/projects/:id', requireAuth, requireProjectAccess, (req, res) => {
   const { name, description, memberIds } = req.body;
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-
-  if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+  const project = req.project;
 
   db.prepare(`
     UPDATE projects SET name = ?, description = ?, updated_at = datetime('now') WHERE id = ?
@@ -442,9 +470,8 @@ app.put('/api/projects/:id', requireAuth, (req, res) => {
   res.json(formatProject(row));
 });
 
-app.delete('/api/projects/:id', requireAuth, (req, res) => {
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+app.delete('/api/projects/:id', requireAuth, requireProjectAccess, (req, res) => {
+  const project = req.project;
 
   const files = db.prepare('SELECT stored_name FROM files WHERE project_id = ?').all(req.params.id);
   const dir = path.join(UPLOAD_DIR, String(req.params.id));
@@ -459,9 +486,8 @@ app.delete('/api/projects/:id', requireAuth, (req, res) => {
   res.json({ message: 'Projeto excluído' });
 });
 
-app.post('/api/projects/:id/regenerate-link', requireAuth, (req, res) => {
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+app.post('/api/projects/:id/regenerate-link', requireAuth, requireProjectAccess, (req, res) => {
+  const project = req.project;
 
   const token = uuidv4();
   db.prepare('UPDATE projects SET client_token = ?, updated_at = datetime(\'now\') WHERE id = ?')
@@ -473,7 +499,7 @@ app.post('/api/projects/:id/regenerate-link', requireAuth, (req, res) => {
 
 // --- Files ---
 
-app.get('/api/projects/:projectId/files', requireAuth, (req, res) => {
+app.get('/api/projects/:projectId/files', requireAuth, requireProjectAccess, (req, res) => {
   const rows = db.prepare(`
     SELECT f.*, u.username AS uploader_name
     FROM files f JOIN users u ON u.id = f.uploaded_by
@@ -484,9 +510,8 @@ app.get('/api/projects/:projectId/files', requireAuth, (req, res) => {
   res.json(rows.map(formatFile));
 });
 
-app.post('/api/projects/:projectId/files', requireAuth, upload.single('file'), (req, res) => {
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.projectId);
-  if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+app.post('/api/projects/:projectId/files', requireAuth, requireProjectAccess, upload.single('file'), (req, res) => {
+  const project = req.project;
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
 
   const result = db.prepare(`
@@ -514,7 +539,7 @@ app.post('/api/projects/:projectId/files', requireAuth, upload.single('file'), (
   res.status(201).json(formatFile(row));
 });
 
-app.get('/api/projects/:projectId/files/:fileId/download', requireAuth, (req, res) => {
+app.get('/api/projects/:projectId/files/:fileId/download', requireAuth, requireProjectAccess, (req, res) => {
   const file = db.prepare('SELECT * FROM files WHERE id = ? AND project_id = ?')
     .get(req.params.fileId, req.params.projectId);
 
@@ -526,7 +551,7 @@ app.get('/api/projects/:projectId/files/:fileId/download', requireAuth, (req, re
   res.download(filePath, file.original_name);
 });
 
-app.delete('/api/projects/:projectId/files/:fileId', requireAuth, (req, res) => {
+app.delete('/api/projects/:projectId/files/:fileId', requireAuth, requireProjectAccess, (req, res) => {
   const file = db.prepare('SELECT * FROM files WHERE id = ? AND project_id = ?')
     .get(req.params.fileId, req.params.projectId);
 
