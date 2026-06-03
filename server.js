@@ -1,64 +1,18 @@
 const express = require('express');
 const session = require('express-session');
+const PgSession = require('connect-pg-simple')(session);
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
-const db = require('./database');
+const { pool, initDatabase } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-// Armazenador de sessões persistente no SQLite
-const SqliteStore = (() => {
-  const Store = session.Store;
-  return class extends Store {
-    constructor(database) {
-      super();
-      this.db = database;
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS sessions (
-          sid TEXT PRIMARY KEY,
-          sess TEXT NOT NULL,
-          expired TEXT NOT NULL
-        )
-      `);
-      // Limpa sessões expiradas na inicialização
-      this.db.exec('DELETE FROM sessions WHERE datetime(\'now\') > expired');
-    }
-    get(sid, cb) {
-      try {
-        const row = this.db.prepare('SELECT sess FROM sessions WHERE sid = ? AND datetime(\'now\') <= expired').get(sid);
-        if (!row) return cb(null, null);
-        cb(null, JSON.parse(row.sess));
-      } catch (err) {
-        cb(err);
-      }
-    }
-    set(sid, sess, cb) {
-      try {
-        const expired = new Date(sess.cookie.expires || (Date.now() + 7 * 24 * 60 * 60 * 1000)).toISOString();
-        const sessStr = JSON.stringify(sess);
-        this.db.prepare('INSERT OR REPLACE INTO sessions (sid, sess, expired) VALUES (?, ?, ?)').run(sid, sessStr, expired);
-        cb(null);
-      } catch (err) {
-        cb(err);
-      }
-    }
-    destroy(sid, cb) {
-      try {
-        this.db.prepare('DELETE FROM sessions WHERE sid = ?').run(sid);
-        cb(null);
-      } catch (err) {
-        cb(err);
-      }
-    }
-  };
-})();
 
 const cors = require('cors');
 app.use(express.json());
@@ -67,7 +21,11 @@ app.use(cors({ origin: process.env.CORS_ORIGIN || '*', credentials: true }));
 
 app.set('trust proxy', 1);
 app.use(session({
-  store: new SqliteStore(db),
+  store: new PgSession({
+    pool: pool,
+    tableName: 'sessions',
+    createTableIfMissing: true
+  }),
   secret: process.env.SESSION_SECRET || 'eng-hub-secret-change-in-production',
   resave: false,
   saveUninitialized: false,
@@ -97,6 +55,8 @@ const upload = multer({
   limits: { fileSize: 500 * 1024 * 1024 }
 });
 
+// --- Middlewares ---
+
 function requireAuth(req, res, next) {
   if (!req.session.userId) {
     return res.status(401).json({ error: 'Não autenticado' });
@@ -104,10 +64,75 @@ function requireAuth(req, res, next) {
   next();
 }
 
-function logActivity(userId, projectId, action, details = '') {
-  db.prepare(
-    'INSERT INTO activity (project_id, user_id, action, details) VALUES (?, ?, ?, ?)'
-  ).run(projectId, userId, action, details);
+async function requireProjectAccess(req, res, next) {
+  const projectId = req.params.id || req.params.projectId;
+  if (!projectId) return res.status(400).json({ error: 'ID do projeto não informado' });
+
+  try {
+    const { rows } = await pool.query('SELECT * FROM projects WHERE id = $1', [projectId]);
+    const project = rows[0];
+    if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+
+    const userId = req.session.userId;
+
+    // Criador sempre tem acesso
+    if (project.created_by === userId) {
+      req.project = project;
+      return next();
+    }
+
+    // Verifica se é membro do projeto
+    const memberCheck = await pool.query(
+      'SELECT 1 FROM project_members WHERE project_id = $1 AND user_id = $2',
+      [projectId, userId]
+    );
+
+    if (memberCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Você não tem acesso a este projeto' });
+    }
+
+    req.project = project;
+    next();
+  } catch (err) {
+    console.error('Erro no requireProjectAccess:', err);
+    res.status(500).json({ error: 'Erro interno' });
+  }
+}
+
+// --- Helpers ---
+
+async function logActivity(userId, projectId, action, details = '') {
+  await pool.query(
+    'INSERT INTO activity (project_id, user_id, action, details) VALUES ($1, $2, $3, $4)',
+    [projectId, userId, action, details]
+  );
+}
+
+async function getProjectMembers(projectId) {
+  const { rows } = await pool.query(`
+    SELECT u.id, u.username FROM project_members pm
+    JOIN users u ON u.id = pm.user_id
+    WHERE pm.project_id = $1
+    ORDER BY pm.added_at ASC
+  `, [projectId]);
+  return rows;
+}
+
+async function setProjectMembers(projectId, memberIds) {
+  // Remove existing members
+  await pool.query('DELETE FROM project_members WHERE project_id = $1', [projectId]);
+
+  // Insert new members (max 8)
+  const validIds = memberIds.slice(0, 8);
+  for (const userId of validIds) {
+    const { rows } = await pool.query('SELECT id FROM users WHERE id = $1', [userId]);
+    if (rows.length > 0) {
+      await pool.query(
+        'INSERT INTO project_members (project_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [projectId, userId]
+      );
+    }
+  }
 }
 
 function formatFile(row) {
@@ -116,13 +141,14 @@ function formatFile(row) {
     projectId: row.project_id,
     originalName: row.original_name,
     mimeType: row.mime_type,
-    size: row.size,
+    size: Number(row.size),
     uploadedBy: row.uploader_name,
     uploadedAt: row.uploaded_at
   };
 }
 
-function formatProject(row) {
+async function formatProject(row) {
+  const members = await getProjectMembers(row.id);
   return {
     id: row.id,
     name: row.name,
@@ -131,22 +157,28 @@ function formatProject(row) {
     createdBy: row.creator_name,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    fileCount: row.file_count || 0
+    fileCount: Number(row.file_count) || 0,
+    members
   };
 }
 
 // --- Auth ---
 
-app.get('/api/auth/check', (req, res) => {
+app.get('/api/auth/check', async (req, res) => {
   if (!req.session.userId) {
     return res.json({ authenticated: false });
   }
-  const user = db.prepare('SELECT id, username, email, phone FROM users WHERE id = ?')
-    .get(req.session.userId);
-  res.json({ authenticated: true, user });
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, username, email, phone FROM users WHERE id = $1', [req.session.userId]
+    );
+    res.json({ authenticated: true, user: rows[0] });
+  } catch (err) {
+    res.json({ authenticated: false });
+  }
 });
 
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   const { username, password, email, phone } = req.body;
 
   if (!username || !password || !email || !phone) {
@@ -159,46 +191,61 @@ app.post('/api/auth/register', (req, res) => {
     return res.status(400).json({ error: 'E-mail inválido' });
   }
 
-  const existing = db.prepare(
-    'SELECT id FROM users WHERE username = ? COLLATE NOCASE OR email = ?'
-  ).get(username.trim(), email.trim().toLowerCase());
+  try {
+    const existing = await pool.query(
+      'SELECT id FROM users WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($2)',
+      [username.trim(), email.trim()]
+    );
 
-  if (existing) {
-    return res.status(409).json({ error: 'Login ou e-mail já cadastrado' });
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'Login ou e-mail já cadastrado' });
+    }
+
+    const hash = bcrypt.hashSync(password, 10);
+    const result = await pool.query(
+      'INSERT INTO users (username, password_hash, email, phone) VALUES ($1, $2, $3, $4) RETURNING id',
+      [username.trim(), hash, email.trim().toLowerCase(), phone.trim()]
+    );
+
+    const userId = result.rows[0].id;
+    req.session.userId = userId;
+    await logActivity(userId, null, 'register', `Usuário ${username} cadastrado`);
+
+    res.status(201).json({
+      message: 'Cadastro realizado com sucesso',
+      user: { id: userId, username: username.trim(), email, phone }
+    });
+  } catch (err) {
+    console.error('Erro no registro:', err);
+    res.status(500).json({ error: 'Erro interno ao registrar' });
   }
-
-  const hash = bcrypt.hashSync(password, 10);
-  const result = db.prepare(
-    'INSERT INTO users (username, password_hash, email, phone) VALUES (?, ?, ?, ?)'
-  ).run(username.trim(), hash, email.trim().toLowerCase(), phone.trim());
-
-  req.session.userId = result.lastInsertRowid;
-  logActivity(result.lastInsertRowid, null, 'register', `Usuário ${username} cadastrado`);
-
-  res.status(201).json({
-    message: 'Cadastro realizado com sucesso',
-    user: { id: result.lastInsertRowid, username: username.trim(), email, phone }
-  });
 });
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
     return res.status(400).json({ error: 'Informe login e senha' });
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE')
-    .get(username.trim());
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM users WHERE LOWER(username) = LOWER($1)', [username.trim()]
+    );
+    const user = rows[0];
 
-  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
-    return res.status(401).json({ error: 'Login ou senha incorretos' });
+    if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+      return res.status(401).json({ error: 'Login ou senha incorretos' });
+    }
+
+    req.session.userId = user.id;
+    res.json({
+      user: { id: user.id, username: user.username, email: user.email, phone: user.phone }
+    });
+  } catch (err) {
+    console.error('Erro no login:', err);
+    res.status(500).json({ error: 'Erro interno' });
   }
-
-  req.session.userId = user.id;
-  res.json({
-    user: { id: user.id, username: user.username, email: user.email, phone: user.phone }
-  });
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -209,44 +256,49 @@ app.post('/api/auth/logout', (req, res) => {
 
 // --- Password Recovery ---
 
-app.post('/api/auth/forgot-password', (req, res) => {
+app.post('/api/auth/forgot-password', async (req, res) => {
   const { identifier } = req.body;
 
   if (!identifier || !identifier.trim()) {
     return res.status(400).json({ error: 'Informe seu e-mail, telefone ou usuário' });
   }
 
-  const cleanIdentifier = identifier.trim();
-  const user = db.prepare(
-    'SELECT id, username, email, phone FROM users WHERE email = ? OR phone = ? OR username = ? COLLATE NOCASE'
-  ).get(cleanIdentifier, cleanIdentifier, cleanIdentifier);
+  try {
+    const cleanId = identifier.trim();
+    const { rows } = await pool.query(
+      'SELECT id, username, email, phone FROM users WHERE LOWER(email) = LOWER($1) OR phone = $2 OR LOWER(username) = LOWER($3)',
+      [cleanId, cleanId, cleanId]
+    );
+    const user = rows[0];
 
-  if (!user) {
-    return res.status(404).json({ error: 'Nenhum usuário encontrado com os dados informados' });
+    if (!user) {
+      return res.status(404).json({ error: 'Nenhum usuário encontrado com os dados informados' });
+    }
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+    await pool.query(
+      "UPDATE users SET reset_code = $1, reset_expires = NOW() + INTERVAL '15 minutes' WHERE id = $2",
+      [code, user.id]
+    );
+
+    console.log(`\n======================================================`);
+    console.log(`[SIMULAÇÃO] Código de redefinição de senha para ${user.username}: ${code}`);
+    console.log(`======================================================\n`);
+
+    await logActivity(user.id, null, 'forgot_password', `Código de recuperação gerado para ${user.username}`);
+
+    res.json({
+      message: `Código enviado com sucesso! (Simulado: ${code})`,
+      code: code
+    });
+  } catch (err) {
+    console.error('Erro no forgot-password:', err);
+    res.status(500).json({ error: 'Erro interno' });
   }
-
-  // Gera um código de 6 dígitos
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
-
-  // Salva no banco com 15 minutos de validade
-  db.prepare(
-    "UPDATE users SET reset_code = ?, reset_expires = datetime('now', '+15 minutes') WHERE id = ?"
-  ).run(code, user.id);
-
-  // Simulação de envio (log no console do servidor e resposta de sucesso)
-  console.log(`\n======================================================`);
-  console.log(`[SIMULAÇÃO] Código de redefinição de senha para ${user.username}: ${code}`);
-  console.log(`======================================================\n`);
-
-  logActivity(user.id, null, 'forgot_password', `Código de recuperação gerado para ${user.username}`);
-
-  res.json({
-    message: `Código enviado com sucesso! (Simulado: ${code})`,
-    code: code // Retornando o código para testes rápidos no frontend
-  });
 });
 
-app.post('/api/auth/reset-password', (req, res) => {
+app.post('/api/auth/reset-password', async (req, res) => {
   const { identifier, code, newPassword } = req.body;
 
   if (!identifier || !code || !newPassword) {
@@ -257,290 +309,424 @@ app.post('/api/auth/reset-password', (req, res) => {
     return res.status(400).json({ error: 'A nova senha deve ter pelo menos 6 caracteres' });
   }
 
-  const cleanIdentifier = identifier.trim();
-  const cleanCode = code.trim();
+  try {
+    const cleanId = identifier.trim();
+    const cleanCode = code.trim();
 
-  // Procura o usuário que tenha o código correspondente e ainda esteja dentro da validade
-  const user = db.prepare(`
-    SELECT * FROM users
-    WHERE (email = ? OR phone = ? OR username = ?)
-      AND reset_code = ?
-      AND datetime('now') < reset_expires
-  `).get(cleanIdentifier, cleanIdentifier, cleanIdentifier, cleanCode);
+    const { rows } = await pool.query(`
+      SELECT * FROM users
+      WHERE (LOWER(email) = LOWER($1) OR phone = $2 OR LOWER(username) = LOWER($3))
+        AND reset_code = $4
+        AND NOW() < reset_expires
+    `, [cleanId, cleanId, cleanId, cleanCode]);
 
-  if (!user) {
-    return res.status(400).json({ error: 'Código de verificação inválido ou expirado' });
+    const user = rows[0];
+    if (!user) {
+      return res.status(400).json({ error: 'Código de verificação inválido ou expirado' });
+    }
+
+    const hash = bcrypt.hashSync(newPassword, 10);
+    await pool.query(
+      'UPDATE users SET password_hash = $1, reset_code = NULL, reset_expires = NULL WHERE id = $2',
+      [hash, user.id]
+    );
+
+    await logActivity(user.id, null, 'reset_password', `Senha redefinida para ${user.username}`);
+    res.json({ message: 'Senha redefinida com sucesso!' });
+  } catch (err) {
+    console.error('Erro no reset-password:', err);
+    res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
+// --- Users (search for adding members) ---
+
+app.get('/api/users/search', requireAuth, async (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (!q || q.length < 1) return res.json([]);
+
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, username FROM users WHERE username ILIKE $1 ORDER BY username ASC LIMIT 10',
+      [`%${q}%`]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao buscar usuários' });
+  }
+});
+
+// --- Project Members ---
+
+app.get('/api/projects/:id/members', requireAuth, requireProjectAccess, async (req, res) => {
+  const members = await getProjectMembers(req.params.id);
+  res.json(members);
+});
+
+app.put('/api/projects/:id/members', requireAuth, requireProjectAccess, async (req, res) => {
+  const { memberIds } = req.body;
+  const project = req.project;
+
+  if (!Array.isArray(memberIds)) {
+    return res.status(400).json({ error: 'memberIds deve ser um array' });
+  }
+  if (memberIds.length > 8) {
+    return res.status(400).json({ error: 'Máximo de 8 responsáveis por projeto' });
   }
 
-  // Atualiza a senha e limpa o código
-  const hash = bcrypt.hashSync(newPassword, 10);
-  db.prepare(
-    "UPDATE users SET password_hash = ?, reset_code = NULL, reset_expires = NULL WHERE id = ?"
-  ).run(hash, user.id);
+  try {
+    await setProjectMembers(req.params.id, memberIds);
+    await pool.query("UPDATE projects SET updated_at = NOW() WHERE id = $1", [req.params.id]);
+    await logActivity(req.session.userId, project.id, 'members_update', project.name);
 
-  logActivity(user.id, null, 'reset_password', `Senha redefinida para ${user.username}`);
-
-  res.json({ message: 'Senha redefinida com sucesso!' });
+    const members = await getProjectMembers(req.params.id);
+    res.json(members);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao atualizar membros' });
+  }
 });
 
 // --- Projects ---
 
-app.get('/api/projects', requireAuth, (req, res) => {
-  const rows = db.prepare(`
-    SELECT p.*, u.username AS creator_name,
-      (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id) AS file_count
-    FROM projects p
-    JOIN users u ON u.id = p.created_by
-    ORDER BY p.updated_at DESC
-  `).all();
+app.get('/api/projects', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const { rows } = await pool.query(`
+      SELECT p.*, u.username AS creator_name,
+        (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id) AS file_count
+      FROM projects p
+      JOIN users u ON u.id = p.created_by
+      WHERE p.created_by = $1
+        OR p.id IN (SELECT pm.project_id FROM project_members pm WHERE pm.user_id = $2)
+      ORDER BY p.updated_at DESC
+    `, [userId, userId]);
 
-  res.json(rows.map(formatProject));
+    const projects = await Promise.all(rows.map(formatProject));
+    res.json(projects);
+  } catch (err) {
+    console.error('Erro ao listar projetos:', err);
+    res.status(500).json({ error: 'Erro interno' });
+  }
 });
 
-app.post('/api/projects', requireAuth, (req, res) => {
-  const { name, description } = req.body;
+app.post('/api/projects', requireAuth, async (req, res) => {
+  const { name, description, memberIds } = req.body;
 
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'Nome do projeto é obrigatório' });
   }
 
-  const token = uuidv4();
-  const result = db.prepare(
-    'INSERT INTO projects (name, description, client_token, created_by) VALUES (?, ?, ?, ?)'
-  ).run(name.trim(), (description || '').trim(), token, req.session.userId);
+  try {
+    const token = uuidv4();
+    const result = await pool.query(
+      'INSERT INTO projects (name, description, client_token, created_by) VALUES ($1, $2, $3, $4) RETURNING id',
+      [name.trim(), (description || '').trim(), token, req.session.userId]
+    );
+    const projectId = result.rows[0].id;
 
-  logActivity(req.session.userId, result.lastInsertRowid, 'project_create', name.trim());
+    // Sempre adiciona o criador como membro + os membros informados
+    const allMemberIds = Array.isArray(memberIds) ? [...memberIds] : [];
+    if (!allMemberIds.includes(req.session.userId)) {
+      allMemberIds.unshift(req.session.userId);
+    }
+    await setProjectMembers(projectId, allMemberIds);
 
-  const row = db.prepare(`
-    SELECT p.*, u.username AS creator_name, 0 AS file_count
-    FROM projects p JOIN users u ON u.id = p.created_by WHERE p.id = ?
-  `).get(result.lastInsertRowid);
+    await logActivity(req.session.userId, projectId, 'project_create', name.trim());
 
-  res.status(201).json(formatProject(row));
-});
+    const { rows } = await pool.query(`
+      SELECT p.*, u.username AS creator_name, 0 AS file_count
+      FROM projects p JOIN users u ON u.id = p.created_by WHERE p.id = $1
+    `, [projectId]);
 
-app.get('/api/projects/:id', requireAuth, (req, res) => {
-  const row = db.prepare(`
-    SELECT p.*, u.username AS creator_name,
-      (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id) AS file_count
-    FROM projects p JOIN users u ON u.id = p.created_by WHERE p.id = ?
-  `).get(req.params.id);
-
-  if (!row) return res.status(404).json({ error: 'Projeto não encontrado' });
-  res.json(formatProject(row));
-});
-
-app.put('/api/projects/:id', requireAuth, (req, res) => {
-  const { name, description } = req.body;
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-
-  if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
-
-  db.prepare(`
-    UPDATE projects SET name = ?, description = ?, updated_at = datetime('now') WHERE id = ?
-  `).run(
-    (name || project.name).trim(),
-    description !== undefined ? description.trim() : project.description,
-    req.params.id
-  );
-
-  logActivity(req.session.userId, project.id, 'project_update', name || project.name);
-
-  const row = db.prepare(`
-    SELECT p.*, u.username AS creator_name,
-      (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id) AS file_count
-    FROM projects p JOIN users u ON u.id = p.created_by WHERE p.id = ?
-  `).get(req.params.id);
-
-  res.json(formatProject(row));
-});
-
-app.delete('/api/projects/:id', requireAuth, (req, res) => {
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
-
-  const files = db.prepare('SELECT stored_name FROM files WHERE project_id = ?').all(req.params.id);
-  const dir = path.join(UPLOAD_DIR, String(req.params.id));
-
-  db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
-
-  if (fs.existsSync(dir)) {
-    fs.rmSync(dir, { recursive: true, force: true });
+    res.status(201).json(await formatProject(rows[0]));
+  } catch (err) {
+    console.error('Erro ao criar projeto:', err);
+    res.status(500).json({ error: 'Erro interno' });
   }
-
-  logActivity(req.session.userId, null, 'project_delete', project.name);
-  res.json({ message: 'Projeto excluído' });
 });
 
-app.post('/api/projects/:id/regenerate-link', requireAuth, (req, res) => {
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+app.get('/api/projects/:id', requireAuth, requireProjectAccess, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT p.*, u.username AS creator_name,
+        (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id) AS file_count
+      FROM projects p JOIN users u ON u.id = p.created_by WHERE p.id = $1
+    `, [req.params.id]);
 
-  const token = uuidv4();
-  db.prepare('UPDATE projects SET client_token = ?, updated_at = datetime(\'now\') WHERE id = ?')
-    .run(token, req.params.id);
+    if (!rows[0]) return res.status(404).json({ error: 'Projeto não encontrado' });
+    res.json(await formatProject(rows[0]));
+  } catch (err) {
+    res.status(500).json({ error: 'Erro interno' });
+  }
+});
 
-  logActivity(req.session.userId, project.id, 'link_regenerate', project.name);
-  res.json({ clientToken: token });
+app.put('/api/projects/:id', requireAuth, requireProjectAccess, async (req, res) => {
+  const { name, description, memberIds } = req.body;
+  const project = req.project;
+
+  try {
+    await pool.query(
+      'UPDATE projects SET name = $1, description = $2, updated_at = NOW() WHERE id = $3',
+      [
+        (name || project.name).trim(),
+        description !== undefined ? description.trim() : project.description,
+        req.params.id
+      ]
+    );
+
+    if (Array.isArray(memberIds)) {
+      await setProjectMembers(req.params.id, memberIds);
+    }
+
+    await logActivity(req.session.userId, project.id, 'project_update', name || project.name);
+
+    const { rows } = await pool.query(`
+      SELECT p.*, u.username AS creator_name,
+        (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id) AS file_count
+      FROM projects p JOIN users u ON u.id = p.created_by WHERE p.id = $1
+    `, [req.params.id]);
+
+    res.json(await formatProject(rows[0]));
+  } catch (err) {
+    console.error('Erro ao atualizar projeto:', err);
+    res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
+app.delete('/api/projects/:id', requireAuth, requireProjectAccess, async (req, res) => {
+  const project = req.project;
+
+  try {
+    const dir = path.join(UPLOAD_DIR, String(req.params.id));
+    await pool.query('DELETE FROM projects WHERE id = $1', [req.params.id]);
+
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+
+    await logActivity(req.session.userId, null, 'project_delete', project.name);
+    res.json({ message: 'Projeto excluído' });
+  } catch (err) {
+    console.error('Erro ao excluir projeto:', err);
+    res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
+app.post('/api/projects/:id/regenerate-link', requireAuth, requireProjectAccess, async (req, res) => {
+  const project = req.project;
+
+  try {
+    const token = uuidv4();
+    await pool.query(
+      'UPDATE projects SET client_token = $1, updated_at = NOW() WHERE id = $2',
+      [token, req.params.id]
+    );
+
+    await logActivity(req.session.userId, project.id, 'link_regenerate', project.name);
+    res.json({ clientToken: token });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro interno' });
+  }
 });
 
 // --- Files ---
 
-app.get('/api/projects/:projectId/files', requireAuth, (req, res) => {
-  const rows = db.prepare(`
-    SELECT f.*, u.username AS uploader_name
-    FROM files f JOIN users u ON u.id = f.uploaded_by
-    WHERE f.project_id = ?
-    ORDER BY f.uploaded_at DESC
-  `).all(req.params.projectId);
+app.get('/api/projects/:projectId/files', requireAuth, requireProjectAccess, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT f.*, u.username AS uploader_name
+      FROM files f JOIN users u ON u.id = f.uploaded_by
+      WHERE f.project_id = $1
+      ORDER BY f.uploaded_at DESC
+    `, [req.params.projectId]);
 
-  res.json(rows.map(formatFile));
+    res.json(rows.map(formatFile));
+  } catch (err) {
+    res.status(500).json({ error: 'Erro interno' });
+  }
 });
 
-app.post('/api/projects/:projectId/files', requireAuth, upload.single('file'), (req, res) => {
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.projectId);
-  if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+app.post('/api/projects/:projectId/files', requireAuth, requireProjectAccess, upload.single('file'), async (req, res) => {
+  const project = req.project;
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
 
-  const result = db.prepare(`
-    INSERT INTO files (project_id, original_name, stored_name, mime_type, size, uploaded_by)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(
-    req.params.projectId,
-    req.file.originalname,
-    req.file.filename,
-    req.file.mimetype,
-    req.file.size,
-    req.session.userId
-  );
+  try {
+    const result = await pool.query(`
+      INSERT INTO files (project_id, original_name, stored_name, mime_type, size, uploaded_by)
+      VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
+    `, [
+      req.params.projectId,
+      req.file.originalname,
+      req.file.filename,
+      req.file.mimetype,
+      req.file.size,
+      req.session.userId
+    ]);
 
-  db.prepare('UPDATE projects SET updated_at = datetime(\'now\') WHERE id = ?')
-    .run(req.params.projectId);
+    await pool.query('UPDATE projects SET updated_at = NOW() WHERE id = $1', [req.params.projectId]);
+    await logActivity(req.session.userId, project.id, 'file_upload', req.file.originalname);
 
-  logActivity(req.session.userId, project.id, 'file_upload', req.file.originalname);
+    const { rows } = await pool.query(`
+      SELECT f.*, u.username AS uploader_name FROM files f
+      JOIN users u ON u.id = f.uploaded_by WHERE f.id = $1
+    `, [result.rows[0].id]);
 
-  const row = db.prepare(`
-    SELECT f.*, u.username AS uploader_name FROM files f
-    JOIN users u ON u.id = f.uploaded_by WHERE f.id = ?
-  `).get(result.lastInsertRowid);
-
-  res.status(201).json(formatFile(row));
+    res.status(201).json(formatFile(rows[0]));
+  } catch (err) {
+    console.error('Erro no upload:', err);
+    res.status(500).json({ error: 'Erro interno' });
+  }
 });
 
-app.get('/api/projects/:projectId/files/:fileId/download', requireAuth, (req, res) => {
-  const file = db.prepare('SELECT * FROM files WHERE id = ? AND project_id = ?')
-    .get(req.params.fileId, req.params.projectId);
+app.get('/api/projects/:projectId/files/:fileId/download', requireAuth, requireProjectAccess, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM files WHERE id = $1 AND project_id = $2',
+      [req.params.fileId, req.params.projectId]
+    );
+    const file = rows[0];
+    if (!file) return res.status(404).json({ error: 'Arquivo não encontrado' });
 
-  if (!file) return res.status(404).json({ error: 'Arquivo não encontrado' });
+    const filePath = path.join(UPLOAD_DIR, String(req.params.projectId), file.stored_name);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Arquivo não encontrado no disco' });
 
-  const filePath = path.join(UPLOAD_DIR, String(req.params.projectId), file.stored_name);
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Arquivo não encontrado no disco' });
-
-  res.download(filePath, file.original_name);
+    res.download(filePath, file.original_name);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro interno' });
+  }
 });
 
-app.delete('/api/projects/:projectId/files/:fileId', requireAuth, (req, res) => {
-  const file = db.prepare('SELECT * FROM files WHERE id = ? AND project_id = ?')
-    .get(req.params.fileId, req.params.projectId);
+app.delete('/api/projects/:projectId/files/:fileId', requireAuth, requireProjectAccess, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM files WHERE id = $1 AND project_id = $2',
+      [req.params.fileId, req.params.projectId]
+    );
+    const file = rows[0];
+    if (!file) return res.status(404).json({ error: 'Arquivo não encontrado' });
 
-  if (!file) return res.status(404).json({ error: 'Arquivo não encontrado' });
+    const filePath = path.join(UPLOAD_DIR, String(req.params.projectId), file.stored_name);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 
-  const filePath = path.join(UPLOAD_DIR, String(req.params.projectId), file.stored_name);
-  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    await pool.query('DELETE FROM files WHERE id = $1', [req.params.fileId]);
+    await pool.query('UPDATE projects SET updated_at = NOW() WHERE id = $1', [req.params.projectId]);
+    await logActivity(req.session.userId, parseInt(req.params.projectId), 'file_delete', file.original_name);
 
-  db.prepare('DELETE FROM files WHERE id = ?').run(req.params.fileId);
-  db.prepare('UPDATE projects SET updated_at = datetime(\'now\') WHERE id = ?')
-    .run(req.params.projectId);
-
-  logActivity(req.session.userId, req.params.projectId, 'file_delete', file.original_name);
-  res.json({ message: 'Arquivo excluído' });
+    res.json({ message: 'Arquivo excluído' });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro interno' });
+  }
 });
 
-// --- Activity feed (for real-time sync) ---
+// --- Activity feed ---
 
-app.get('/api/activity', requireAuth, (req, res) => {
-  const since = req.query.since || '1970-01-01';
-  const rows = db.prepare(`
-    SELECT a.*, u.username, p.name AS project_name
-    FROM activity a
-    JOIN users u ON u.id = a.user_id
-    LEFT JOIN projects p ON p.id = a.project_id
-    WHERE a.created_at > ?
-    ORDER BY a.created_at DESC
-    LIMIT 50
-  `).all(since);
+app.get('/api/activity', requireAuth, async (req, res) => {
+  try {
+    const since = req.query.since || '1970-01-01';
+    const { rows } = await pool.query(`
+      SELECT a.*, u.username, p.name AS project_name
+      FROM activity a
+      JOIN users u ON u.id = a.user_id
+      LEFT JOIN projects p ON p.id = a.project_id
+      WHERE a.created_at > $1
+      ORDER BY a.created_at DESC
+      LIMIT 50
+    `, [since]);
 
-  res.json(rows);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro interno' });
+  }
 });
 
-app.get('/api/sync', requireAuth, (req, res) => {
-  const since = req.query.since || '1970-01-01';
+app.get('/api/sync', requireAuth, async (req, res) => {
+  try {
+    const since = req.query.since || '1970-01-01';
+    const userId = req.session.userId;
 
-  const projects = db.prepare(`
-    SELECT p.*, u.username AS creator_name,
-      (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id) AS file_count
-    FROM projects p
-    JOIN users u ON u.id = p.created_by
-    WHERE p.updated_at > ?
-    ORDER BY p.updated_at DESC
-  `).all(since);
+    const projectsResult = await pool.query(`
+      SELECT p.*, u.username AS creator_name,
+        (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id) AS file_count
+      FROM projects p
+      JOIN users u ON u.id = p.created_by
+      WHERE p.updated_at > $1
+        AND (p.created_by = $2 OR p.id IN (SELECT pm.project_id FROM project_members pm WHERE pm.user_id = $3))
+      ORDER BY p.updated_at DESC
+    `, [since, userId, userId]);
 
-  const activity = db.prepare(`
-    SELECT a.*, u.username, p.name AS project_name
-    FROM activity a
-    JOIN users u ON u.id = a.user_id
-    LEFT JOIN projects p ON p.id = a.project_id
-    WHERE a.created_at > ?
-    ORDER BY a.created_at DESC LIMIT 20
-  `).all(since);
+    const activityResult = await pool.query(`
+      SELECT a.*, u.username, p.name AS project_name
+      FROM activity a
+      JOIN users u ON u.id = a.user_id
+      LEFT JOIN projects p ON p.id = a.project_id
+      WHERE a.created_at > $1
+      ORDER BY a.created_at DESC LIMIT 20
+    `, [since]);
 
-  res.json({
-    projects: projects.map(formatProject),
-    activity,
-    timestamp: new Date().toISOString()
-  });
+    const projects = await Promise.all(projectsResult.rows.map(formatProject));
+
+    res.json({
+      projects,
+      activity: activityResult.rows,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro interno' });
+  }
 });
 
 // --- Client view (read-only, no auth) ---
 
-app.get('/api/client/:token', (req, res) => {
-  const project = db.prepare(`
-    SELECT p.id, p.name, p.description, p.updated_at
-    FROM projects p WHERE p.client_token = ?
-  `).get(req.params.token);
+app.get('/api/client/:token', async (req, res) => {
+  try {
+    const { rows: projectRows } = await pool.query(
+      'SELECT id, name, description, updated_at FROM projects WHERE client_token = $1',
+      [req.params.token]
+    );
+    const project = projectRows[0];
+    if (!project) return res.status(404).json({ error: 'Link inválido ou expirado' });
 
-  if (!project) return res.status(404).json({ error: 'Link inválido ou expirado' });
+    const { rows: fileRows } = await pool.query(`
+      SELECT f.id, f.original_name, f.mime_type, f.size, f.uploaded_at, u.username AS uploaded_by
+      FROM files f JOIN users u ON u.id = f.uploaded_by
+      WHERE f.project_id = $1
+      ORDER BY f.uploaded_at DESC
+    `, [project.id]);
 
-  const files = db.prepare(`
-    SELECT f.id, f.original_name, f.mime_type, f.size, f.uploaded_at, u.username AS uploaded_by
-    FROM files f JOIN users u ON u.id = f.uploaded_by
-    WHERE f.project_id = ?
-    ORDER BY f.uploaded_at DESC
-  `).all(project.id);
-
-  res.json({
-    project: {
-      name: project.name,
-      description: project.description,
-      updatedAt: project.updated_at
-    },
-    files
-  });
+    res.json({
+      project: {
+        name: project.name,
+        description: project.description,
+        updatedAt: project.updated_at
+      },
+      files: fileRows
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro interno' });
+  }
 });
 
-app.get('/api/client/:token/files/:fileId/download', (req, res) => {
-  const project = db.prepare('SELECT id FROM projects WHERE client_token = ?')
-    .get(req.params.token);
-  if (!project) return res.status(404).json({ error: 'Link inválido' });
+app.get('/api/client/:token/files/:fileId/download', async (req, res) => {
+  try {
+    const { rows: projectRows } = await pool.query(
+      'SELECT id FROM projects WHERE client_token = $1', [req.params.token]
+    );
+    if (!projectRows[0]) return res.status(404).json({ error: 'Link inválido' });
 
-  const file = db.prepare('SELECT * FROM files WHERE id = ? AND project_id = ?')
-    .get(req.params.fileId, project.id);
-  if (!file) return res.status(404).json({ error: 'Arquivo não encontrado' });
+    const { rows: fileRows } = await pool.query(
+      'SELECT * FROM files WHERE id = $1 AND project_id = $2',
+      [req.params.fileId, projectRows[0].id]
+    );
+    const file = fileRows[0];
+    if (!file) return res.status(404).json({ error: 'Arquivo não encontrado' });
 
-  const filePath = path.join(UPLOAD_DIR, String(project.id), file.stored_name);
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Arquivo não encontrado' });
+    const filePath = path.join(UPLOAD_DIR, String(projectRows[0].id), file.stored_name);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Arquivo não encontrado' });
 
-  res.download(filePath, file.original_name);
+    res.download(filePath, file.original_name);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro interno' });
+  }
 });
 
 // --- SPA routes ---
@@ -553,6 +739,18 @@ app.get('/client/:token', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'client.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`Eng-Hub rodando em http://localhost:${PORT}`);
-});
+// --- Start server ---
+
+async function startServer() {
+  try {
+    await initDatabase();
+    app.listen(PORT, () => {
+      console.log(`Eng-Hub rodando em http://localhost:${PORT}`);
+    });
+  } catch (err) {
+    console.error('Erro ao iniciar o servidor:', err);
+    process.exit(1);
+  }
+}
+
+startServer();

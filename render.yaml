@@ -1,18 +1,24 @@
+databases:
+  - name: eng-hub-db
+    plan: free
+    databaseName: enghub
+    user: enghub_user
+
 services:
   - type: web
-    name: eng-hub-backend
+    name: eng-hub
     env: node
     plan: free
     buildCommand: npm install
     startCommand: npm start
     envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: eng-hub-db
+          property: connectionString
       - key: SESSION_SECRET
-        value: "your-secret-here"
+        generateValue: true
       - key: NODE_ENV
-        value: "production"
-  - type: static_site
-    name: eng-hub-frontend
-    staticPublishPath: frontend/public
-    buildCommand: npm install
-    env: static
-    plan: free
+        value: production
+      - key: UPLOAD_DIR
+        value: /opt/render/project/src/uploads

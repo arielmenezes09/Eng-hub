@@ -2,7 +2,11 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#1e3a5f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="format-detection" content="telephone=no">
   <title>Eng-Hub | Projetos</title>
   <script>
     (function() {
@@ -17,7 +21,7 @@
 <body class="bg-grid">
   <header class="app-header">
     <div style="display: flex; align-items: center;">
-      <button type="button" id="btn-menu" class="btn btn--ghost btn--icon btn-mobile-menu" title="Menu">
+      <button type="button" id="btn-menu" class="btn btn--ghost btn--icon btn-mobile-menu" title="Menu" aria-label="Abrir menu lateral">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
       <a href="/dashboard" class="logo logo--light">
@@ -31,43 +35,43 @@
       </a>
     </div>
     <div class="app-header__actions">
-      <button type="button" id="btn-theme" class="btn btn--ghost btn--icon btn--icon-theme" title="Alternar tema">
+      <button type="button" id="btn-theme" class="btn btn--ghost btn--icon btn--icon-theme" title="Alternar tema" aria-label="Alternar tema claro/escuro">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m11.314 11.314l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z"/></svg>
       </button>
       <span id="user-info" class="user-badge"></span>
-      <button type="button" id="btn-logout" class="btn btn--ghost btn--sm">Sair</button>
+      <button type="button" id="btn-logout" class="btn btn--ghost btn--sm" aria-label="Sair da conta">Sair</button>
     </div>
   </header>
 
   <main class="app-main">
-    <aside class="sidebar">
+    <aside class="sidebar" role="navigation" aria-label="Navegação de projetos">
       <div class="sidebar__header">
         <h2>Projetos</h2>
-        <button type="button" id="btn-new-project" class="btn btn--primary btn--sm btn--icon" title="Novo projeto">+</button>
+        <button type="button" id="btn-new-project" class="btn btn--primary btn--sm btn--icon" title="Novo projeto" aria-label="Criar novo projeto">+</button>
       </div>
-      <ul id="project-list" class="project-list"></ul>
-        <div class="project-filters">
-          <div class="form-group">
-            <label for="filter-status">Filtrar por status</label>
-            <select id="filter-status">
-              <option value="">Todos</option>
-              <option value="em_andamento">Em andamento</option>
-              <option value="concluido">Concluído</option>
-              <option value="pendente">Pendente</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label for="filter-deadline">Prazo até</label>
-            <input type="date" id="filter-deadline" />
-          </div>
+      <ul id="project-list" class="project-list" role="listbox" aria-label="Lista de projetos"></ul>
+      <div class="project-filters">
+        <div class="form-group">
+          <label for="filter-status">Filtrar por status</label>
+          <select id="filter-status">
+            <option value="">Todos</option>
+            <option value="em_andamento">Em andamento</option>
+            <option value="concluido">Concluído</option>
+            <option value="pendente">Pendente</option>
+          </select>
         </div>
+        <div class="form-group">
+          <label for="filter-deadline">Prazo até</label>
+          <input type="date" id="filter-deadline">
+        </div>
+      </div>
       <div class="sidebar__activity">
         <h3>Atividade recente</h3>
-        <ul id="activity-feed" class="activity-feed"></ul>
+        <ul id="activity-feed" class="activity-feed" aria-label="Feed de atividades"></ul>
       </div>
     </aside>
 
-    <section class="workspace">
+    <section class="workspace" role="main">
       <div id="empty-state" class="empty-state">
         <div class="empty-state__icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/><path d="M12 11v4M10 13h4"/></svg>
@@ -91,7 +95,15 @@
           </div>
         </div>
 
-        <div class="upload-zone" id="upload-zone">
+        <div id="project-members-section" class="project-members-section">
+          <h3 class="project-members-section__title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+            Responsáveis <span id="members-count" class="badge">0</span>
+          </h3>
+          <div id="project-members-list" class="project-members-list"></div>
+        </div>
+
+        <div class="upload-zone" id="upload-zone" role="button" tabindex="0" aria-label="Área de upload de arquivos. Clique ou arraste arquivos aqui.">
           <input type="file" id="file-input" multiple hidden>
           <div class="upload-zone__content">
             <div class="upload-zone__icon">
@@ -105,35 +117,44 @@
 
         <div class="files-toolbar">
           <h3>Arquivos <span id="file-count" class="badge">0</span></h3>
-          <input type="search" id="file-search" placeholder="Buscar arquivo..." class="search-input">
+          <input type="search" id="file-search" placeholder="Buscar arquivo..." class="search-input" inputmode="search" enterkeyhint="search" aria-label="Buscar arquivos">
         </div>
-        <div id="file-list" class="file-list"></div>
+        <div id="file-list" class="file-list" role="list" aria-label="Lista de arquivos"></div>
       </div>
     </section>
   </main>
 
-  <dialog id="modal-project" class="modal">
-    <form id="form-project" method="post" onsubmit="return false;">
+  <dialog id="modal-project" class="modal" aria-labelledby="modal-project-title">
+    <form id="form-project" method="post" onsubmit="return false;" autocomplete="off">
       <h3 id="modal-project-title">Novo projeto</h3>
       <div class="form-group">
         <label for="project-name-input">Nome do projeto *</label>
-        <input type="text" id="project-name-input" required placeholder="Ex: Residencial Solar — Fase 2">
+        <input type="text" id="project-name-input" required placeholder="Ex: Residencial Solar — Fase 2" inputmode="text" enterkeyhint="next">
       </div>
-        <div class="form-group">
-          <label for="project-deadline-input">Prazo de entrega *</label>
-          <input type="date" id="project-deadline-input" required />
-        </div>
-        <div class="form-group">
-          <label for="project-status-select">Status *</label>
-          <select id="project-status-select" required>
-            <option value="em_andamento">Em andamento</option>
-            <option value="concluido">Concluído</option>
-            <option value="pendente">Pendente</option>
-          </select>
-        </div>
+      <div class="form-group">
+        <label for="project-deadline-input">Prazo de entrega *</label>
+        <input type="date" id="project-deadline-input" required>
+      </div>
+      <div class="form-group">
+        <label for="project-status-select">Status *</label>
+        <select id="project-status-select" required>
+          <option value="em_andamento">Em andamento</option>
+          <option value="concluido">Concluído</option>
+          <option value="pendente">Pendente</option>
+        </select>
+      </div>
       <div class="form-group">
         <label for="project-desc-input">Descrição</label>
-        <textarea id="project-desc-input" rows="3" placeholder="Detalhes do projeto..."></textarea>
+        <textarea id="project-desc-input" rows="3" placeholder="Detalhes do projeto..." enterkeyhint="done"></textarea>
+      </div>
+      <div class="form-group">
+        <label for="members-search-input">Responsáveis (máx. 8)</label>
+        <div class="members-input-wrapper">
+          <div id="members-selected" class="members-selected"></div>
+          <input type="text" id="members-search-input" placeholder="Buscar usuário cadastrado..." autocomplete="off" inputmode="text">
+          <ul id="members-suggestions" class="members-suggestions hidden"></ul>
+        </div>
+        <small class="text-muted">Apenas usuários cadastrados no sistema podem ser adicionados.</small>
       </div>
       <div class="modal__actions">
         <button type="button" class="btn btn--ghost" data-close>Cancelar</button>
@@ -142,11 +163,11 @@
     </form>
   </dialog>
 
-  <dialog id="modal-share" class="modal">
-    <h3>Link de visualização para cliente</h3>
+  <dialog id="modal-share" class="modal" aria-labelledby="modal-share-title">
+    <h3 id="modal-share-title">Link de visualização para cliente</h3>
     <p class="text-muted">O cliente poderá <strong>apenas visualizar e baixar</strong> os arquivos, sem editar ou excluir.</p>
     <div class="share-link-box">
-      <input type="text" id="share-link" readonly>
+      <input type="text" id="share-link" readonly aria-label="Link de compartilhamento">
       <button type="button" id="btn-copy-link" class="btn btn--primary btn--sm">Copiar</button>
     </div>
     <button type="button" id="btn-regenerate-link" class="btn btn--ghost btn--sm">Gerar novo link</button>
@@ -155,7 +176,7 @@
     </div>
   </dialog>
 
-  <div id="sidebar-overlay" class="sidebar-overlay"></div>
+  <div id="sidebar-overlay" class="sidebar-overlay" aria-hidden="true"></div>
 
   <script src="/js/dashboard.js"></script>
 </body>

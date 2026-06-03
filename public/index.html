@@ -2,7 +2,11 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#152a45">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="format-detection" content="telephone=no">
   <title>Eng-Hub | Acesso</title>
   <script>
     (function() {
@@ -13,30 +17,9 @@
     })();
   </script>
   <link rel="stylesheet" href="css/style.css">
-  <style>
-    /* Estilos essenciais — garantem layout mesmo se o CSS externo falhar */
-    .auth-page {
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 1.5rem;
-      background: #152a45;
-      font-family: 'Segoe UI', system-ui, sans-serif;
-    }
-    .auth-wrapper { width: 100%; max-width: 440px; }
-    .auth-box {
-      background: #fff;
-      border-radius: 14px;
-      padding: 2.25rem 2rem;
-      box-shadow: 0 8px 40px rgba(0,0,0,0.35);
-    }
-    .auth-form:not(.active) { display: none; }
-    .auth-form.active { display: block; }
-  </style>
 </head>
 <body class="auth-page">
-  <button type="button" id="btn-theme" class="btn btn--ghost btn--icon btn--icon-theme theme-toggle-auth" title="Alternar tema" style="position: absolute; top: 1.25rem; right: 1.25rem; color: #fff; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 50%; z-index: 10;">
+  <button type="button" id="btn-theme" class="btn btn--ghost btn--icon btn--icon-theme theme-toggle-auth" title="Alternar tema">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m11.314 11.314l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z"/></svg>
   </button>
   <div class="auth-wrapper">
@@ -51,55 +34,55 @@
         </div>
       </div>
 
-      <div class="auth-tabs">
-        <button type="button" class="auth-tab active" data-tab="login">Entrar</button>
-        <button type="button" class="auth-tab" data-tab="register">Cadastrar</button>
+      <div class="auth-tabs" role="tablist">
+        <button type="button" class="auth-tab active" data-tab="login" role="tab" aria-selected="true" aria-controls="form-login">Entrar</button>
+        <button type="button" class="auth-tab" data-tab="register" role="tab" aria-selected="false" aria-controls="form-register">Cadastrar</button>
       </div>
 
-      <form id="form-login" class="auth-form active">
+      <form id="form-login" class="auth-form active" role="tabpanel" autocomplete="on">
         <p class="auth-box__subtitle">Acesse sua conta para gerenciar projetos e arquivos.</p>
         <div class="form-group">
           <label for="login-user">Login</label>
-          <input type="text" id="login-user" name="username" required autocomplete="username" placeholder="Seu usuário">
+          <input type="text" id="login-user" name="username" required autocomplete="username" placeholder="Seu usuário" inputmode="text" enterkeyhint="next">
         </div>
         <div class="form-group">
           <div style="display: flex; justify-content: space-between; align-items: center;">
             <label for="login-pass" style="margin-bottom: 0.35rem;">Senha</label>
             <button type="button" id="link-forgot" class="link-btn" style="font-size: 0.75rem; font-weight: 500; text-decoration: none; margin-bottom: 0.35rem;">Esqueci a senha</button>
           </div>
-          <input type="password" id="login-pass" name="password" required autocomplete="current-password" placeholder="Sua senha">
+          <input type="password" id="login-pass" name="password" required autocomplete="current-password" placeholder="Sua senha" enterkeyhint="go">
         </div>
         <button type="submit" class="btn btn--primary btn--block">Entrar</button>
-        <p class="form-feedback" role="status"></p>
+        <p class="form-feedback" role="status" aria-live="polite"></p>
       </form>
 
-      <form id="form-register" class="auth-form" hidden>
+      <form id="form-register" class="auth-form" role="tabpanel" hidden autocomplete="on">
         <p class="auth-box__subtitle">Crie sua conta com login, senha, e-mail e telefone.</p>
         <div class="form-group">
           <label for="reg-user">Login *</label>
-          <input type="text" id="reg-user" name="username" required autocomplete="username" placeholder="Escolha um usuário">
+          <input type="text" id="reg-user" name="username" required autocomplete="username" placeholder="Escolha um usuário" inputmode="text" enterkeyhint="next">
         </div>
         <div class="form-group">
           <label for="reg-pass">Senha *</label>
-          <input type="password" id="reg-pass" name="password" required autocomplete="new-password" placeholder="Mínimo 6 caracteres">
+          <input type="password" id="reg-pass" name="password" required autocomplete="new-password" placeholder="Mínimo 6 caracteres" enterkeyhint="next">
         </div>
         <div class="form-group">
           <label for="reg-pass-confirm">Confirmar Senha *</label>
-          <input type="password" id="reg-pass-confirm" name="password_confirm" required placeholder="Repita a senha">
+          <input type="password" id="reg-pass-confirm" name="password_confirm" required placeholder="Repita a senha" autocomplete="new-password" enterkeyhint="next">
         </div>
         <div class="form-group">
           <label for="reg-email">E-mail *</label>
-          <input type="email" id="reg-email" name="email" required autocomplete="email" placeholder="seu@email.com">
+          <input type="email" id="reg-email" name="email" required autocomplete="email" placeholder="seu@email.com" inputmode="email" enterkeyhint="next">
         </div>
         <div class="form-group">
           <label for="reg-phone">Telefone *</label>
-          <input type="tel" id="reg-phone" name="phone" required autocomplete="tel" placeholder="(11) 99999-9999">
+          <input type="tel" id="reg-phone" name="phone" required autocomplete="tel" placeholder="(11) 99999-9999" inputmode="tel" enterkeyhint="done">
         </div>
         <button type="submit" class="btn btn--primary btn--block">Criar conta</button>
-        <p class="form-feedback" role="status"></p>
+        <p class="form-feedback" role="status" aria-live="polite"></p>
       </form>
 
-      <form id="form-recovery" class="auth-form" hidden>
+      <form id="form-recovery" class="auth-form" hidden autocomplete="off">
         <p class="auth-box__subtitle">Recuperação de Senha</p>
         
         <!-- Etapa 1: Solicitar código -->
@@ -107,30 +90,30 @@
           <p class="text-muted" style="margin-bottom: 1.25rem; font-size: 0.8125rem;">Digite seu login, e-mail ou telefone para enviarmos um código de verificação.</p>
           <div class="form-group">
             <label for="recovery-identifier">Login, E-mail ou Telefone</label>
-            <input type="text" id="recovery-identifier" placeholder="usuario, e-mail ou (11) 99999-9999">
+            <input type="text" id="recovery-identifier" placeholder="usuario, e-mail ou (11) 99999-9999" inputmode="text" enterkeyhint="send">
           </div>
           <button type="button" id="btn-send-code" class="btn btn--primary btn--block">Enviar código</button>
         </div>
 
-        <!-- Etapa 2: Validar código e redefinir senha (inicia oculta) -->
+        <!-- Etapa 2: Validar código e redefinir senha -->
         <div id="recovery-step-2" class="hidden">
           <p class="text-muted" style="margin-bottom: 1.25rem; font-size: 0.8125rem;">Insira o código de 6 dígitos que enviamos e defina sua nova senha.</p>
           <div class="form-group">
             <label for="recovery-code">Código de Verificação *</label>
-            <input type="text" id="recovery-code" maxlength="6" placeholder="Digite os 6 dígitos">
+            <input type="text" id="recovery-code" maxlength="6" placeholder="Digite os 6 dígitos" inputmode="numeric" pattern="[0-9]*" enterkeyhint="next" autocomplete="one-time-code">
           </div>
           <div class="form-group">
             <label for="recovery-pass">Nova Senha *</label>
-            <input type="password" id="recovery-pass" placeholder="Mínimo 6 caracteres">
+            <input type="password" id="recovery-pass" placeholder="Mínimo 6 caracteres" autocomplete="new-password" enterkeyhint="next">
           </div>
           <div class="form-group">
             <label for="recovery-pass-confirm">Confirmar Nova Senha *</label>
-            <input type="password" id="recovery-pass-confirm" placeholder="Repita a nova senha">
+            <input type="password" id="recovery-pass-confirm" placeholder="Repita a nova senha" autocomplete="new-password" enterkeyhint="done">
           </div>
           <button type="submit" class="btn btn--primary btn--block">Redefinir senha</button>
         </div>
 
-        <p class="form-feedback" role="status"></p>
+        <p class="form-feedback" role="status" aria-live="polite"></p>
         
         <div style="margin-top: 1.5rem; text-align: center; border-top: 1px solid var(--border-light); padding-top: 1rem;">
           <button type="button" id="btn-back-login" class="link-btn" style="font-size: 0.8125rem; text-decoration: none;">Voltar para o Login</button>
